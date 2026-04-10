@@ -36,7 +36,7 @@ class Message(Base):
 
     # 上下文压缩相关字段
     is_summarized: Mapped[bool] = mapped_column(Boolean, default=False)
-    metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    meta_data: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
 
     # 关联会话
     session: Mapped["Session"] = relationship("Session", back_populates="messages")

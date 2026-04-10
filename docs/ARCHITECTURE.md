@@ -89,6 +89,28 @@ class Message:
 
 ### MCP 集成
 
+### Channel 集成
+
+Channel 是连接 IM 平台（微信、飞书等）与 Agent 的消息通道。
+
+**架构**：
+```
+IM 平台 → ChannelAdapter → ChannelService → AgentService.chat() → Adapter.send_message() → IM 平台
+```
+
+**核心组件**：
+- `ChannelAdapter`：IM 平台适配器抽象基类
+- `WeChatAdapter`：微信 ilink Bot 实现（长轮询 + context_token 管理）
+- `ChannelService`：管理生命周期、消息路由、会话映射
+
+**会话映射**：IM 对话 ↔ Agent session 一对一绑定，保持对话上下文
+
+**数据模型**：
+- `Channel`：Channel 配置（平台、token、白名单等）
+- `ChannelSession`：IM 会话与 Agent 会话的映射关系
+
+### MCP 集成
+
 MCP (Model Context Protocol) 是连接外部资源的标准协议。
 
 **支持两种传输方式**：
@@ -229,11 +251,18 @@ claude-agent/
 │   │       └── transport/    # 传输层
 │   │           ├── stdio.py  # STDIO 传输
 │   │           └── http.py   # HTTP/SSE 传输
+│   │   └── channel/          # IM Channel 集成
+│   │       ├── __init__.py
+│   │       ├── types.py      # 共享类型
+│   │       ├── base.py       # ChannelAdapter 抽象基类
+│   │       ├── service.py    # ChannelService 核心逻辑
+│   │       └── wechat.py     # 微信 ilink Bot Adapter
 │   ├── api/                  # API 层
 │   │   ├── __init__.py       # 路由注册
 │   │   ├── chat.py           # 对话接口
 │   │   ├── sessions.py       # 会话管理
 │   │   ├── skills.py         # Skills 接口
+│   │   └── channel.py        # Channel 管理 + 微信登录
 │   │   └── schemas/          # Pydantic 模型（请求/响应）
 │   │       ├── __init__.py
 │   │       ├── chat.py
@@ -243,7 +272,8 @@ claude-agent/
 │   │   ├── database.py       # 连接管理
 │   │   └── models/           # SQLAlchemy ORM 模型
 │   │       ├── __init__.py
-│   │       └── session.py
+│   │       ├── session.py
+│   │       └── channel.py    # Channel + ChannelSession 模型
 │   └── middleware/           # 中间件
 │       ├── __init__.py
 │       └── auth.py           # API Key 认证
@@ -269,6 +299,11 @@ claude-agent/
 | `/api/sessions` | GET/POST | 会话管理 |
 | `/api/tools` | GET | 工具列表 |
 | `/api/skills` | GET | 技能列表 |
+| `/api/channels` | POST/GET | Channel 管理 |
+| `/api/channels/{id}/start` | POST | 启动 Channel |
+| `/api/channels/{id}/stop` | POST | 停止 Channel |
+| `/api/channels/wechat/{id}/qrcode` | POST | 微信登录二维码 |
+| `/api/channels/wechat/{id}/status` | GET | 微信登录状态 |
 
 ### 请求示例
 

@@ -12,7 +12,7 @@ from backend.middleware.auth import verify_api_key
 router = APIRouter()
 
 
-@router.get("/sessions", response_model=SessionList)
+@router.get("", response_model=SessionList)
 async def list_sessions(
     limit: int = 20,
     offset: int = 0,
@@ -51,7 +51,7 @@ async def list_sessions(
     return SessionList(sessions=session_list, total=total)
 
 
-@router.get("/sessions/{session_id}/messages", response_model=MessageList)
+@router.get("/{session_id}/messages", response_model=MessageList)
 async def get_session_messages(
     session_id: str,
     limit: int = 50,
@@ -97,7 +97,7 @@ async def get_session_messages(
     )
 
 
-@router.delete("/sessions/{session_id}")
+@router.delete("/{session_id}")
 async def delete_session(
     session_id: str,
     db: AsyncSession = Depends(get_db),

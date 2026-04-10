@@ -5,8 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.config import get_settings
 from backend.api import router
+from backend.config import get_settings
 from backend.db.database import init_db
 
 
@@ -15,8 +15,16 @@ async def lifespan(app: FastAPI):
     """应用生命周期管理。"""
     # 启动时
     await init_db()
+
+    # 加载并启动 channels
+    from backend.core.channel.service import channel_service
+    await channel_service.load_channels()
+    await channel_service.start_all()
+
     yield
-    # 关闭时（如有需要）
+
+    # 关闭时停止所有 channels
+    await channel_service.stop_all()
 
 
 def create_app() -> FastAPI:

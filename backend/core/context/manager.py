@@ -157,7 +157,7 @@ class ContextManager:
                 "content": msg.content,
                 "created_at": msg.created_at.isoformat() if msg.created_at else None,
                 "is_summarized": msg.is_summarized,
-                "metadata": msg.metadata,
+                "metadata": msg.meta_data,
             }
             for msg in messages
         ]
