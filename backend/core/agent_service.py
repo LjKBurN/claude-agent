@@ -1,6 +1,8 @@
 """Agent 服务封装。"""
 
+import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -16,6 +18,13 @@ from backend.core.tools import get_tools
 from backend.core.tool_executor import tool_executor
 from backend.core.mcp.manager import mcp_manager
 from backend.core.context.manager import context_manager
+
+logger = logging.getLogger(__name__)
+
+# Agent 执行保护常量
+MAX_TOOL_ITERATIONS = 20       # 工具循环最大次数
+API_MAX_RETRIES = 3            # API 可恢复错误最大重试次数
+TOOL_EXECUTION_TIMEOUT = 120   # 单个工具执行超时（秒）
 
 
 class AgentService:
@@ -61,6 +70,71 @@ class AgentService:
         if self.settings.anthropic_base_url:
             kwargs["base_url"] = self.settings.anthropic_base_url
         return kwargs
+
+    # ==================== 错误恢复 ====================
+
+    @staticmethod
+    def _is_retryable_error(exc: Exception) -> bool:
+        """判断 API 错误是否可重试。"""
+        from anthropic import (
+            APIConnectionError,
+            APITimeoutError,
+            InternalServerError,
+            OverloadedError,
+            RateLimitError,
+            ServiceUnavailableError,
+        )
+
+        return isinstance(exc, (
+            RateLimitError,
+            InternalServerError,
+            OverloadedError,
+            ServiceUnavailableError,
+            APITimeoutError,
+            APIConnectionError,
+        ))
+
+    async def _call_with_retry(self, client, messages, tools, system):
+        """带重试的 API 调用（非流式）。"""
+        for attempt in range(API_MAX_RETRIES):
+            try:
+                return client.messages.create(
+                    model=self.settings.model_id,
+                    max_tokens=8000,
+                    tools=tools,
+                    messages=messages,
+                    system=system,
+                )
+            except Exception as e:
+                if not self._is_retryable_error(e) or attempt == API_MAX_RETRIES - 1:
+                    raise
+                wait = 2 ** attempt
+                logger.warning(
+                    f"API error (attempt {attempt + 1}/{API_MAX_RETRIES}): "
+                    f"{type(e).__name__}, retrying in {wait}s"
+                )
+                await asyncio.sleep(wait)
+
+    async def _stream_with_retry(self, client, messages, tools, system):
+        """带重试的 API 流式调用。"""
+        for attempt in range(API_MAX_RETRIES):
+            try:
+                return client.messages.stream(
+                    model=self.settings.model_id,
+                    max_tokens=4096,
+                    tools=tools,
+                    messages=messages,
+                    system=system,
+                )
+            except Exception as e:
+                if not self._is_retryable_error(e) or attempt == API_MAX_RETRIES - 1:
+                    raise
+                wait = 2 ** attempt
+                logger.warning(
+                    f"API stream error (attempt {attempt + 1}/{API_MAX_RETRIES}): "
+                    f"{type(e).__name__}, retrying in {wait}s"
+                )
+                await asyncio.sleep(wait)
 
     # ==================== 公开接口 ====================
 
@@ -262,22 +336,21 @@ class AgentService:
         client = Anthropic(**self._get_client_kwargs())
         tools = self._get_all_tools()
         tool_calls: list[ToolCall] = []
+        system = "You are a helpful assistant."
 
-        while True:
-            response = client.messages.create(
-                model=self.settings.model_id,
-                max_tokens=8000,
-                tools=tools,
-                messages=messages,
-                system="You are a helpful assistant.",
-            )
+        for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
+            # API 调用带重试
+            try:
+                response = await self._call_with_retry(client, messages, tools, system)
+            except Exception as e:
+                logger.error(f"API call failed after retries: {e}")
+                return f"[Error] API 调用失败: {type(e).__name__}", tool_calls
 
             if response.stop_reason == "tool_use":
                 messages.append({"role": "assistant", "content": response.content})
                 tool_results, new_tools = await self._process_tool_calls(
-                    response.content, tool_calls, messages
+                    response.content, tool_calls, messages, tools
                 )
-                # 动态注册新发现的 MCP 工具
                 if new_tools:
                     tools.extend(new_tools)
                 messages.append({"role": "user", "content": tool_results})
@@ -290,6 +363,9 @@ class AgentService:
                 text = self._extract_text(response.content)
                 return text or f"Stopped: {response.stop_reason}", tool_calls
 
+        logger.warning(f"Agent reached max iterations ({MAX_TOOL_ITERATIONS})")
+        return "[Error] Agent 达到最大工具调用次数，请简化请求", tool_calls
+
     async def _run_agent_stream(
         self, messages: list[dict]
     ) -> AsyncGenerator[dict, None]:
@@ -298,15 +374,18 @@ class AgentService:
 
         client = Anthropic(**self._get_client_kwargs())
         tools = self._get_all_tools()
+        system = "You are a helpful assistant."
 
-        while True:
-            with client.messages.stream(
-                model=self.settings.model_id,
-                max_tokens=4096,
-                tools=tools,
-                messages=messages,
-                system="You are a helpful assistant.",
-            ) as stream:
+        for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
+            # API 流式调用带重试
+            try:
+                stream_ctx = await self._stream_with_retry(client, messages, tools, system)
+            except Exception as e:
+                logger.error(f"API stream failed after retries: {e}")
+                yield {"type": "text", "content": f"[Error] API 调用失败: {type(e).__name__}"}
+                return
+
+            with stream_ctx as stream:
                 current_tool: dict[str, Any] | None = None
 
                 for event in stream:
@@ -329,22 +408,18 @@ class AgentService:
 
                     elif event.type == "content_block_stop":
                         if current_tool:
-                            # 处理工具调用
                             for evt in await self._process_stream_tool(
                                 current_tool, messages, tools
                             ):
                                 yield evt
                             current_tool = None
 
-                # 获取最终消息
                 final_message = stream.get_final_message()
 
                 if final_message.stop_reason == "tool_use":
-                    # 构建工具结果消息，继续循环
                     tool_results, new_tools = await self._build_tool_results_from_final(
                         final_message.content
                     )
-                    # 动态注册新发现的 MCP 工具
                     if new_tools:
                         tools.extend(new_tools)
                     messages.append({
@@ -354,6 +429,9 @@ class AgentService:
                     messages.append({"role": "user", "content": tool_results})
                 else:
                     return
+
+        logger.warning(f"Agent stream reached max iterations ({MAX_TOOL_ITERATIONS})")
+        yield {"type": "text", "content": "[Error] Agent 达到最大工具调用次数，请简化请求"}
 
     # ==================== 工具处理 ====================
 
@@ -371,6 +449,9 @@ class AgentService:
     ) -> tuple[str, list[dict] | None]:
         """统一的工具执行入口。
 
+        工具执行失败时返回错误文本给 LLM，而不是抛出异常。
+        LLM 可以根据错误信息决定重试或换策略。
+
         Args:
             tool_name: 工具名称
             tool_input: 工具输入
@@ -383,48 +464,64 @@ class AgentService:
         """
         mcp_tool_names = self._get_mcp_tool_names()
 
-        # 检查是否是 MCP 工具
-        if tool_name in mcp_tool_names:
-            output = await mcp_manager.call_tool(tool_name, tool_input)
-            return output, None
+        try:
+            # 检查是否是 MCP 工具（加超时）
+            if tool_name in mcp_tool_names:
+                output = await asyncio.wait_for(
+                    mcp_manager.call_tool(tool_name, tool_input),
+                    timeout=TOOL_EXECUTION_TIMEOUT,
+                )
+                return output, None
 
-        # 使用 ToolExecutor 执行（内置工具 + Skill + MCP Search）
-        result = tool_executor.execute(
-            tool_name=tool_name,
-            tool_input=tool_input,
-            tool_id=tool_id,
-        )
+            # 使用 ToolExecutor 执行（内置工具 + Skill + MCP Search）
+            result = tool_executor.execute(
+                tool_name=tool_name,
+                tool_input=tool_input,
+                tool_id=tool_id,
+            )
 
-        events = []
+            events = []
 
-        # 如果是 Skill，注入消息
-        if result.messages_to_inject:
-            messages.extend(result.messages_to_inject)
-            skill_name = tool_input.get("command", "")
-            events.append({
-                "type": "skill_load",
-                "skill_name": skill_name,
-                "message": f'The "{skill_name}" skill is loading'
-            })
+            # 如果是 Skill，注入消息
+            if result.messages_to_inject:
+                messages.extend(result.messages_to_inject)
+                skill_name = tool_input.get("command", "")
+                events.append({
+                    "type": "skill_load",
+                    "skill_name": skill_name,
+                    "message": f'The "{skill_name}" skill is loading'
+                })
 
-        # 如果是 MCP Search，注册新发现的工具
-        if result.tools_to_register and tools is not None:
-            tools.extend(result.tools_to_register)
-            events.append({
-                "type": "mcp_tools_loaded",
-                "count": len(result.tools_to_register),
-                "tools": [t["name"] for t in result.tools_to_register],
-            })
+            # 如果是 MCP Search，注册新发现的工具
+            if result.tools_to_register and tools is not None:
+                tools.extend(result.tools_to_register)
+                events.append({
+                    "type": "mcp_tools_loaded",
+                    "count": len(result.tools_to_register),
+                    "tools": [t["name"] for t in result.tools_to_register],
+                })
 
-        return result.output, events if events else None
+            return result.output, events if events else None
+
+        except asyncio.TimeoutError:
+            error_msg = f"Tool '{tool_name}' timed out ({TOOL_EXECUTION_TIMEOUT}s)"
+            logger.warning(error_msg)
+            return error_msg, None
+        except Exception as e:
+            error_msg = f"Tool '{tool_name}' failed: {type(e).__name__}: {str(e)[:500]}"
+            logger.error(error_msg)
+            return error_msg, None
 
     async def _process_tool_calls(
         self,
         content_blocks,
         tool_calls: list[ToolCall],
         messages: list[dict],
+        tools: list[dict] | None = None,
     ) -> tuple[list[dict], list[dict]]:
         """处理工具调用（非流式）。
+
+        单个工具失败不中断循环，错误信息返回给 LLM。
 
         Returns:
             (tool_results, new_tools) - 工具结果列表和需要注册的新工具
@@ -441,6 +538,7 @@ class AgentService:
                 tool_input=block.input,
                 tool_id=block.id,
                 messages=messages,
+                tools=tools,
             )
 
             tool_calls.append(ToolCall(
