@@ -6,8 +6,9 @@
 import asyncio
 import base64
 import logging
+import os
 import uuid
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 
@@ -16,9 +17,7 @@ from backend.core.channel.types import ChannelMessage
 
 logger = logging.getLogger(__name__)
 
-# ilink API 常量
 ILINK_BASE_URL = "https://ilinkai.weixin.qq.com"
-CDN_BASE_URL = "https://novac2c.cdn.weixin.qq.com/c2c"
 BOT_TYPE = 3
 MSG_TYPE_USER = 1
 MSG_TYPE_BOT = 2
@@ -30,43 +29,36 @@ CHANNEL_VERSION = "0.2.0"
 class WeChatAdapter(ChannelAdapter):
     """微信 ilink Bot 适配器。
 
-    功能：
-    - QR 扫码登录获取 token
-    - 长轮询获取消息
-    - context_token 缓存管理
-    - 发送文本消息
-    - 发送 typing 状态
+    start() 启动长轮询，stop() 取消轮询并清理资源。
+    运行时状态（cursor、context_tokens）保存在内存中。
     """
 
-    def __init__(self, channel_id: str, config: dict, on_message: Callable):
+    def __init__(self, channel_id: str, config: dict, on_message):
         super().__init__(channel_id, config, on_message)
 
         self.bot_token: str = config.get("bot_token", "")
         self.ilink_bot_id: str = config.get("ilink_bot_id", "")
         self.ilink_user_id: str = config.get("ilink_user_id", "")
 
-        # 长轮询游标
+        # 运行时状态
         self._updates_buf: str = ""
-        # context_token 缓存：conversation_id -> context_token
         self._context_tokens: dict[str, str] = {}
-        # 轮询 task
         self._poll_task: asyncio.Task | None = None
-        self._running = False
-        # 连续失败计数
         self._fail_count = 0
-        # HTTP 客户端
         self._client: httpx.AsyncClient | None = None
 
+    @property
+    def is_configured(self) -> bool:
+        return bool(self.bot_token)
+
     def _get_client(self) -> httpx.AsyncClient:
-        """获取 HTTP 客户端。"""
         if self._client is None or self._client.is_closed:
             self._client = httpx.AsyncClient(timeout=40)
         return self._client
 
     def _get_headers(self) -> dict[str, str]:
-        """获取认证请求头。"""
-        import os
         uin = base64.b64encode(os.urandom(4)).decode()
+        logger.debug(f"[wechat:{self.channel_id}] bot_token: {self.bot_token}")
         return {
             "Content-Type": "application/json",
             "AuthorizationType": "ilink_bot_token",
@@ -77,7 +69,6 @@ class WeChatAdapter(ChannelAdapter):
     # ==================== 生命周期 ====================
 
     async def start(self) -> None:
-        """启动长轮询。"""
         if self._running:
             return
         if not self.bot_token:
@@ -89,7 +80,6 @@ class WeChatAdapter(ChannelAdapter):
         logger.info(f"[wechat:{self.channel_id}] Started polling")
 
     async def stop(self) -> None:
-        """停止长轮询。"""
         self._running = False
         if self._poll_task and not self._poll_task.done():
             self._poll_task.cancel()
@@ -105,7 +95,6 @@ class WeChatAdapter(ChannelAdapter):
     # ==================== 消息轮询 ====================
 
     async def _poll_loop(self) -> None:
-        """长轮询循环。"""
         while self._running:
             try:
                 messages = await self._get_updates()
@@ -128,7 +117,6 @@ class WeChatAdapter(ChannelAdapter):
                 await asyncio.sleep(wait)
 
     async def _get_updates(self) -> list[dict]:
-        """调用 getupdates 长轮询获取新消息。"""
         client = self._get_client()
         resp = await client.post(
             f"{ILINK_BASE_URL}/ilink/bot/getupdates",
@@ -141,20 +129,17 @@ class WeChatAdapter(ChannelAdapter):
         resp.raise_for_status()
         data = resp.json()
 
-        if data.get("ret") != 0:
-            logger.warning(f"[wechat:{self.channel_id}] getupdates ret={data.get('ret')}")
-            return []
-
-        # 更新游标
         new_buf = data.get("get_updates_buf", "")
         if new_buf:
             self._updates_buf = new_buf
 
-        return data.get("msgs", [])
+        msgs = data.get("msgs", [])
+        if msgs:
+            logger.info(f"[wechat:{self.channel_id}] Got {len(msgs)} messages")
+
+        return msgs
 
     async def _handle_raw_message(self, msg: dict) -> None:
-        """处理原始微信消息。"""
-        # 只处理用户消息
         if msg.get("message_type") != MSG_TYPE_USER:
             return
 
@@ -163,14 +148,18 @@ class WeChatAdapter(ChannelAdapter):
         group_id = msg.get("group_id", "")
         context_token = msg.get("context_token", "")
 
-        # 确定 conversation_id
-        conversation_id = group_id or session_id
+        # 私聊时 session_id 和 group_id 都为空，用 from_user_id 作为 conversation_id
+        conversation_id = group_id or session_id or from_user_id
 
-        # 缓存 context_token
+        logger.info(
+            f"[wechat:{self.channel_id}] Raw message: "
+            f"sender={from_user_id}, conv={conversation_id}, "
+            f"group={'yes' if group_id else 'no'}, has_ctx={'yes' if context_token else 'no'}"
+        )
+
         if context_token:
             self._context_tokens[conversation_id] = context_token
 
-        # 解析文本
         text = self._extract_text(msg)
         if not text:
             return
@@ -186,8 +175,8 @@ class WeChatAdapter(ChannelAdapter):
 
         await self._on_message(self.channel_id, channel_msg)
 
-    def _extract_text(self, msg: dict) -> str:
-        """从消息中提取文本。"""
+    @staticmethod
+    def _extract_text(msg: dict) -> str:
         item_list = msg.get("item_list", [])
         texts = []
         for item in item_list:
@@ -195,7 +184,7 @@ class WeChatAdapter(ChannelAdapter):
             if item_type == MSG_ITEM_TEXT:
                 text_item = item.get("text_item", {})
                 texts.append(text_item.get("text", ""))
-            elif item_type == 3:  # 语音
+            elif item_type == 3:
                 voice_item = item.get("voice_item", {})
                 voice_text = voice_item.get("text", "")
                 if voice_text:
@@ -205,7 +194,6 @@ class WeChatAdapter(ChannelAdapter):
     # ==================== 发送消息 ====================
 
     async def send_message(self, conversation_id: str, text: str, **kwargs) -> None:
-        """发送文本消息。"""
         context_token = self._context_tokens.get(conversation_id, "")
         if not context_token:
             logger.warning(
@@ -242,14 +230,17 @@ class WeChatAdapter(ChannelAdapter):
             )
 
     async def send_typing(self, conversation_id: str) -> None:
-        """发送正在输入状态。"""
         context_token = self._context_tokens.get(conversation_id, "")
+        logger.info(
+            f"[wechat:{self.channel_id}] send_typing: conv={conversation_id}, "
+            f"has_token={'yes' if context_token else 'no'}, "
+            f"stored_convs={list(self._context_tokens.keys())}"
+        )
         if not context_token:
             return
 
         try:
             client = self._get_client()
-            # 1. 获取 typing_ticket
             resp = await client.post(
                 f"{ILINK_BASE_URL}/ilink/bot/getconfig",
                 headers=self._get_headers(),
@@ -264,7 +255,6 @@ class WeChatAdapter(ChannelAdapter):
             if not typing_ticket:
                 return
 
-            # 2. 发送 typing
             await client.post(
                 f"{ILINK_BASE_URL}/ilink/bot/sendtyping",
                 headers=self._get_headers(),
@@ -281,11 +271,6 @@ class WeChatAdapter(ChannelAdapter):
     # ==================== QR 登录 ====================
 
     async def request_qrcode(self) -> dict[str, str]:
-        """获取登录二维码。
-
-        Returns:
-            {"qrcode": "id", "qrcode_img_content": "url"}
-        """
         client = self._get_client()
         resp = await client.get(
             f"{ILINK_BASE_URL}/ilink/bot/get_bot_qrcode",
@@ -295,11 +280,6 @@ class WeChatAdapter(ChannelAdapter):
         return resp.json()
 
     async def check_login_status(self, qrcode_id: str) -> dict[str, Any]:
-        """轮询扫码状态。
-
-        Returns:
-            {"status": "wait|scaned|confirmed|expired", "bot_token": "...", ...}
-        """
         client = self._get_client()
         resp = await client.get(
             f"{ILINK_BASE_URL}/ilink/bot/get_qrcode_status",
@@ -307,17 +287,4 @@ class WeChatAdapter(ChannelAdapter):
             headers={"iLink-App-ClientVersion": "1"},
         )
         resp.raise_for_status()
-        data = resp.json()
-
-        # 登录成功时保存 token
-        if data.get("status") == "confirmed":
-            self.bot_token = data.get("bot_token", "")
-            self.ilink_bot_id = data.get("ilink_bot_id", "")
-            self.ilink_user_id = data.get("ilink_user_id", "")
-            self.config.update({
-                "bot_token": self.bot_token,
-                "ilink_bot_id": self.ilink_bot_id,
-                "ilink_user_id": self.ilink_user_id,
-            })
-
-        return data
+        return resp.json()

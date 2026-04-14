@@ -9,7 +9,12 @@ from backend.db import Base
 
 
 class Channel(Base):
-    """Channel 配置表。"""
+    """Channel 配置表。
+
+    config 字段存储平台特定数据，包括验证凭据：
+    - 微信: bot_token, ilink_bot_id, ilink_user_id
+    - 飞书: app_id, app_secret 等
+    """
 
     __tablename__ = "channels"
 

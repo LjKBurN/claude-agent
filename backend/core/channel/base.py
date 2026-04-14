@@ -1,45 +1,57 @@
-"""Channel Adapter 抽象基类。"""
+"""Channel Adapter 抽象基类。
+
+每个 IM 平台实现此基类，自行决定消息接收方式（长轮询、WebSocket、Webhook 等）。
+"""
 
 from abc import ABC, abstractmethod
 from typing import Callable
+
+from backend.core.channel.types import ChannelMessage
 
 
 class ChannelAdapter(ABC):
     """IM 平台适配器基类。
 
-    每个 IM 平台（微信、飞书等）实现此接口。
-    负责与 IM 平台的通信：接收消息、发送消息、管理连接。
+    子类需实现:
+    - start(): 启动消息接收（轮询/WebSocket/Webhook）
+    - stop(): 停止消息接收并清理资源
+    - send_message(): 发送文本消息
+    - send_typing(): 发送正在输入状态
     """
 
-    def __init__(self, channel_id: str, config: dict, on_message: Callable):
-        """初始化适配器。
-
-        Args:
-            channel_id: Channel ID
-            config: 平台特定配置
-            on_message: 收到消息时的回调函数，签名为 async (channel_id, message) -> None
-        """
+    def __init__(
+        self,
+        channel_id: str,
+        config: dict,
+        on_message: Callable,
+    ) -> None:
         self.channel_id = channel_id
         self.config = config
         self._on_message = on_message
+        self._running = False
+
+    @property
+    def is_configured(self) -> bool:
+        """是否已配置凭据（如 token）。子类可覆写。"""
+        return False
+
+    @property
+    def is_running(self) -> bool:
+        """是否正在运行（轮询/WebSocket 已启动）。"""
+        return self._running
 
     @abstractmethod
     async def start(self) -> None:
-        """启动适配器（开始轮询/webhook监听）。"""
+        """启动消息接收。"""
 
     @abstractmethod
     async def stop(self) -> None:
-        """停止适配器。"""
+        """停止消息接收并清理资源。"""
 
     @abstractmethod
     async def send_message(self, conversation_id: str, text: str, **kwargs) -> None:
-        """发送消息到 IM 平台。
-
-        Args:
-            conversation_id: IM 平台会话 ID
-            text: 消息文本
-        """
+        """发送文本消息。"""
 
     @abstractmethod
     async def send_typing(self, conversation_id: str) -> None:
-        """发送"正在输入"状态。"""
+        """发送正在输入状态。非关键操作，可空实现。"""

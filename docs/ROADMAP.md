@@ -151,6 +151,22 @@ curl -X POST http://localhost:8000/api/chat \
 - [ ] Markdown 渲染 + 代码高亮（react-markdown + shiki）
 - [ ] Docker 集成（docker-compose 添加 web 服务）
 
+---
+
+## Phase 7: Channel 前端集成（3-5 天）🔄
+
+**目标**：Web 端管理 Channel，实现微信扫码登录、启停控制、关联会话查看
+
+**任务**：
+- [x] Channel API 层（types.ts + channels.ts）
+- [x] SWR Hook（use-channels.ts）
+- [x] Channel 列表页（/channels，独立布局）
+- [x] Channel 详情页（/channels/[channelId]，启停 + 登录 + 白名单 + 会话）
+- [x] 微信扫码登录组件（QR 码展示 + 状态轮询）
+- [x] 白名单管理组件
+- [x] 关联会话列表组件
+- [x] 侧边栏入口（Channel 管理链接）
+
 **验收**：
 ```bash
 # 启动后端

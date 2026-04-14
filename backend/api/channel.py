@@ -1,4 +1,4 @@
-"""Channel 管理 API 路由。"""
+"""Channel 管理 API 路由 — 通用 CRUD + 启停 + 白名单 + 关联会话。"""
 
 import uuid
 
@@ -8,15 +8,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.core.channel.service import channel_service
-from backend.core.channel.wechat import WeChatAdapter
 from backend.db.database import get_db
-from backend.db.models import Channel
+from backend.db.models import Channel, ChannelSession
 from backend.middleware.auth import verify_api_key
 
 router = APIRouter()
-
-
-# ==================== Schemas ====================
 
 
 class CreateChannelRequest(BaseModel):
@@ -39,9 +35,6 @@ async def create_channel(
     db: AsyncSession = Depends(get_db),
 ):
     """创建 Channel。"""
-    if req.platform not in ("wechat",):
-        raise HTTPException(400, f"Unsupported platform: {req.platform}")
-
     channel = Channel(
         id=str(uuid.uuid4()),
         platform=req.platform,
@@ -50,7 +43,7 @@ async def create_channel(
         allowed_senders=req.allowed_senders,
     )
     db.add(channel)
-    await db.flush()
+    await db.commit()
 
     # 注册 adapter
     adapter = channel_service._create_adapter(channel)
@@ -77,6 +70,10 @@ async def list_channels(db: AsyncSession = Depends(get_db)):
             "name": c.name,
             "enabled": c.enabled,
             "allowed_senders": c.allowed_senders,
+            "configured": channel_service.get_adapter(c.id).is_configured
+                if channel_service.get_adapter(c.id) else False,
+            "running": channel_service.get_adapter(c.id).is_running
+                if channel_service.get_adapter(c.id) else False,
         }
         for c in channels
     ]
@@ -89,6 +86,7 @@ async def get_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
     channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(404, "Channel not found")
+    adapter = channel_service.get_adapter(channel_id)
     return {
         "id": channel.id,
         "platform": channel.platform,
@@ -100,6 +98,8 @@ async def get_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
         },
         "enabled": channel.enabled,
         "allowed_senders": channel.allowed_senders,
+        "configured": adapter.is_configured if adapter else False,
+        "running": adapter.is_running if adapter else False,
     }
 
 
@@ -114,8 +114,36 @@ async def delete_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
         raise HTTPException(404, "Channel not found")
 
     await db.delete(channel)
-    await db.flush()
+    await db.commit()
     return {"success": True}
+
+
+# ==================== 关联会话 ====================
+
+
+@router.get("/{channel_id}/sessions", dependencies=[Depends(verify_api_key)])
+async def list_channel_sessions(
+    channel_id: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """列出 Channel 关联的会话。"""
+    result = await db.execute(
+        select(ChannelSession)
+        .where(ChannelSession.channel_id == channel_id)
+        .order_by(ChannelSession.last_active_at.desc())
+    )
+    sessions = result.scalars().all()
+    return [
+        {
+            "id": s.id,
+            "channel_id": s.channel_id,
+            "im_conversation_id": s.im_conversation_id,
+            "agent_session_id": s.agent_session_id,
+            "context_data": s.context_data,
+            "last_active_at": s.last_active_at.isoformat() if s.last_active_at else None,
+        }
+        for s in sessions
+    ]
 
 
 # ==================== 启停 ====================
@@ -124,14 +152,16 @@ async def delete_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
 @router.post("/{channel_id}/start", dependencies=[Depends(verify_api_key)])
 async def start_channel(channel_id: str, db: AsyncSession = Depends(get_db)):
     """启动 Channel。"""
-    # 检查是否有 token
     result = await db.execute(select(Channel).where(Channel.id == channel_id))
     channel = result.scalar_one_or_none()
     if not channel:
         raise HTTPException(404, "Channel not found")
 
-    if channel.platform == "wechat" and not channel.config.get("bot_token"):
-        raise HTTPException(400, "WeChat channel requires bot_token. Login first.")
+    # 确保 adapter 已注册
+    if not channel_service.get_adapter(channel_id):
+        adapter = channel_service._create_adapter(channel)
+        if adapter:
+            channel_service.register_adapter(channel.id, adapter)
 
     return await channel_service.start_channel(channel_id)
 
@@ -158,52 +188,5 @@ async def update_senders(
         raise HTTPException(404, "Channel not found")
 
     channel.allowed_senders = req.allowed_senders
-    await db.flush()
+    await db.commit()
     return {"success": True, "allowed_senders": req.allowed_senders}
-
-
-# ==================== 微信登录 ====================
-
-
-@router.post("/wechat/{channel_id}/qrcode", dependencies=[Depends(verify_api_key)])
-async def wechat_qrcode(channel_id: str, db: AsyncSession = Depends(get_db)):
-    """获取微信登录二维码。"""
-    adapter = channel_service.get_adapter(channel_id)
-    if not adapter or not isinstance(adapter, WeChatAdapter):
-        raise HTTPException(404, "WeChat adapter not found")
-
-    try:
-        result = await adapter.request_qrcode()
-        return result
-    except Exception as e:
-        raise HTTPException(500, f"Failed to get QR code: {e}")
-
-
-@router.get("/wechat/{channel_id}/status", dependencies=[Depends(verify_api_key)])
-async def wechat_login_status(
-    channel_id: str,
-    qrcode: str,
-    db: AsyncSession = Depends(get_db),
-):
-    """轮询微信扫码状态。"""
-    adapter = channel_service.get_adapter(channel_id)
-    if not adapter or not isinstance(adapter, WeChatAdapter):
-        raise HTTPException(404, "WeChat adapter not found")
-
-    result = await adapter.check_login_status(qrcode)
-
-    # 登录成功时保存 token 到数据库
-    if result.get("status") == "confirmed":
-        channel_result = await db.execute(
-            select(Channel).where(Channel.id == channel_id)
-        )
-        channel = channel_result.scalar_one_or_none()
-        if channel:
-            channel.config.update({
-                "bot_token": adapter.bot_token,
-                "ilink_bot_id": adapter.ilink_bot_id,
-                "ilink_user_id": adapter.ilink_user_id,
-            })
-            await db.flush()
-
-    return result
