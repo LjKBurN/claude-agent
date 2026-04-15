@@ -50,6 +50,7 @@ def read_file(arguments: dict) -> str:
         },
         "required": ["file_path", "content"],
     },
+    permission="dangerous",
 )
 def write_file(arguments: dict) -> str:
     """Write content to a file. Creates if doesn't exist, overwrites if it does."""
@@ -85,6 +86,7 @@ def write_file(arguments: dict) -> str:
         },
         "required": ["file_path", "old_string", "new_string"],
     },
+    permission="dangerous",
 )
 def edit_file(arguments: dict) -> str:
     """Replace old_string with new_string in a file. Must read file first."""

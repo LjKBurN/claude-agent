@@ -136,6 +136,28 @@ class AgentService:
                 )
                 await asyncio.sleep(wait)
 
+    def _check_tool_permission(
+        self, tool_name: str, tool_input: dict, mcp_tool_names: set[str]
+    ) -> bool:
+        """检查工具是否安全可自动执行。
+
+        Returns:
+            True = 安全，False = 需要审批
+        """
+        from backend.core.tools.base import get_tool
+
+        # 已注册工具：使用 tool.is_safe() 判断（支持细粒度）
+        tool = get_tool(tool_name)
+        if tool:
+            return tool.is_safe(tool_input)
+
+        # MCP 动态工具：默认需要审批
+        if tool_name in mcp_tool_names:
+            return False
+
+        # 未知工具：需要审批
+        return False
+
     # ==================== 公开接口 ====================
 
     async def chat(
@@ -463,6 +485,14 @@ class AgentService:
             (output, events) - 工具输出和可选的事件列表
         """
         mcp_tool_names = self._get_mcp_tool_names()
+
+        # 权限检查
+        is_safe = self._check_tool_permission(tool_name, tool_input, mcp_tool_names)
+        if not is_safe:
+            # TODO: HITL 实现后替换为退出循环返回审批信息
+            logger.warning(
+                f"Tool '{tool_name}' requires approval (auto-approved for now)"
+            )
 
         try:
             # 检查是否是 MCP 工具（加超时）

@@ -34,6 +34,7 @@ from backend.core.tools.base import register_tool
         },
         "required": ["url"],
     },
+    permission="dangerous",
 )
 def http_request(arguments: dict) -> str:
     """
