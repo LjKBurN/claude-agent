@@ -1,0 +1,115 @@
+/** Chat API types - mirrors backend/api/schemas/chat.py */
+
+export interface ChatRequest {
+  message: string;
+  session_id?: string | null;
+}
+
+export interface ToolCall {
+  name: string;
+  input: Record<string, unknown>;
+  output: string;
+}
+
+export interface ChatResponse {
+  session_id: string;
+  message: string;
+  tool_calls: ToolCall[];
+}
+
+/** Session API types - mirrors backend/api/schemas/session.py */
+
+export interface SessionInfo {
+  id: string;
+  created_at: string;
+  updated_at: string;
+  message_count: number;
+}
+
+export interface SessionList {
+  sessions: SessionInfo[];
+  total: number;
+}
+
+export interface MessageInfo {
+  id: number;
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+export interface MessageList {
+  messages: MessageInfo[];
+  total: number;
+}
+
+/** Skills API types */
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  version: string;
+  source: string;
+  allowed_tools: string[];
+}
+
+export interface SkillsListResponse {
+  skills: SkillInfo[];
+  count: number;
+}
+
+/** Channel API types - mirrors backend/api/channel.py */
+
+export interface ChannelInfo {
+  id: string;
+  platform: string;
+  name: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  allowed_senders: string[];
+  created_at: string;
+  configured: boolean;
+  running: boolean;
+}
+
+export interface CreateChannelRequest {
+  name: string;
+  platform: string;
+  config?: Record<string, unknown>;
+  allowed_senders?: string[];
+}
+
+export interface ChannelStartStopResponse {
+  success: boolean;
+  channel_id: string;
+}
+
+export interface UpdateSendersRequest {
+  allowed_senders: string[];
+}
+
+export interface UpdateSendersResponse {
+  success: boolean;
+  allowed_senders: string[];
+}
+
+export interface WeChatQRCodeResponse {
+  qrcode: string;
+  qrcode_img_content: string;
+}
+
+export interface WeChatLoginStatus {
+  status: "wait" | "scaned" | "confirmed" | "expired";
+  bot_token?: string;
+  ilink_bot_id?: string;
+  ilink_user_id?: string;
+}
+
+export interface ChannelSessionInfo {
+  id: number;
+  channel_id: string;
+  im_conversation_id: string;
+  agent_session_id: string;
+  context_data: Record<string, unknown> | null;
+  last_active_at: string;
+}
