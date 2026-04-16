@@ -18,8 +18,16 @@ class ToolCall(BaseModel):
     output: str
 
 
+class ApprovalInfo(BaseModel):
+    """审批信息。"""
+    name: str
+    input: dict[str, Any]
+
+
 class ChatResponse(BaseModel):
     """聊天响应。"""
     session_id: str
     message: str
     tool_calls: list[ToolCall] = Field(default_factory=list)
+    needs_approval: bool = False
+    approval_info: list[ApprovalInfo] | None = None

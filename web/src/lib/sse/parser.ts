@@ -7,7 +7,8 @@ export type SSEEvent =
   | { type: "tool_end"; name: string; output: string }
   | { type: "skill_load"; name: string; message: string }
   | { type: "mcp_tools_loaded"; count: number; tools: string[] }
-  | { type: "done"; tool_calls: ToolCall[] };
+  | { type: "approval_needed"; message: string; tools: { name: string; input: Record<string, unknown> }[] }
+  | { type: "done"; tool_calls?: ToolCall[]; status?: string };
 
 export async function parseSSEStream(
   stream: ReadableStream<Uint8Array>,
@@ -90,8 +91,14 @@ function parseSSEEvent(raw: string): SSEEvent | null {
           count: parsed.count,
           tools: parsed.tools,
         };
+      case "approval_needed":
+        return {
+          type: "approval_needed",
+          message: parsed.message || "",
+          tools: parsed.tools || [],
+        };
       case "done":
-        return { type: "done", tool_calls: parsed.tool_calls };
+        return { type: "done", tool_calls: parsed.tool_calls, status: parsed.status };
       default:
         return null;
     }

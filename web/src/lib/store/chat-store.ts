@@ -17,6 +17,8 @@ interface ChatState {
   streamingToolCalls: ToolCall[];
   streamingToolName: string | null;
   error: string | null;
+  needsApproval: boolean;
+  approvalTools: { name: string; input: Record<string, unknown> }[];
 
   // Actions
   setSessionId: (id: string | null) => void;
@@ -30,6 +32,8 @@ interface ChatState {
   setError: (error: string | null) => void;
   loadMessages: (messages: MessageInfo[]) => void;
   reset: () => void;
+  setApproval: (tools: { name: string; input: Record<string, unknown> }[]) => void;
+  clearApproval: () => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -40,6 +44,8 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingToolCalls: [],
   streamingToolName: null,
   error: null,
+  needsApproval: false,
+  approvalTools: [],
 
   setSessionId: (id) => set({ sessionId: id }),
 
@@ -95,7 +101,7 @@ export const useChatStore = create<ChatState>((set) => ({
     }),
 
   startStreaming: () =>
-    set({ isStreaming: true, streamingText: "", streamingToolCalls: [], error: null }),
+    set({ isStreaming: true, streamingText: "", streamingToolCalls: [], error: null, needsApproval: false, approvalTools: [] }),
 
   stopStreaming: () =>
     set((state) => {
@@ -121,6 +127,34 @@ export const useChatStore = create<ChatState>((set) => ({
       return { isStreaming: false, streamingText: "" };
     }),
 
+  setApproval: (tools) =>
+    set((state) => {
+      // Commit current streaming text as a message, then set approval state
+      const newMessages = state.streamingText
+        ? [
+            ...state.messages,
+            {
+              id: `assistant-${Date.now()}`,
+              role: "assistant" as const,
+              content: state.streamingText,
+              toolCalls: state.streamingToolCalls,
+              createdAt: new Date().toISOString(),
+            },
+          ]
+        : state.messages;
+      return {
+        messages: newMessages,
+        isStreaming: false,
+        streamingText: "",
+        streamingToolCalls: [],
+        streamingToolName: null,
+        needsApproval: true,
+        approvalTools: tools,
+      };
+    }),
+
+  clearApproval: () => set({ needsApproval: false, approvalTools: [] }),
+
   setError: (error) => set({ error, isStreaming: false }),
 
   loadMessages: (messages) =>
@@ -143,5 +177,7 @@ export const useChatStore = create<ChatState>((set) => ({
       streamingToolCalls: [],
       streamingToolName: null,
       error: null,
+      needsApproval: false,
+      approvalTools: [],
     }),
 }));

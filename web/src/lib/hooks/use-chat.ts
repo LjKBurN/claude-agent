@@ -16,6 +16,8 @@ export function useChat() {
     streamingToolCalls,
     streamingToolName,
     error,
+    needsApproval,
+    approvalTools,
     setSessionId,
     addUserMessage,
     appendStreamText,
@@ -27,11 +29,18 @@ export function useChat() {
     setError,
     loadMessages,
     reset,
+    setApproval,
+    clearApproval,
   } = useChatStore();
 
   const send = useCallback(
     async (text: string) => {
       if (!text.trim() || isStreaming) return;
+
+      // 如果在审批状态，清除审批
+      if (needsApproval) {
+        clearApproval();
+      }
 
       addUserMessage(text);
       startStreaming();
@@ -64,15 +73,19 @@ export function useChat() {
               });
               break;
             case "skill_load":
-              // skill loading indicator - handled in UI
+              break;
+            case "approval_needed":
+              setApproval(event.tools);
               break;
             case "done":
-              // Replace tool_calls with the complete list from done event
               break;
           }
         });
 
-        finalizeStream();
+        // 如果不是 approval 状态，正常 finalize
+        if (!useChatStore.getState().needsApproval) {
+          finalizeStream();
+        }
       } catch (err: unknown) {
         if (err instanceof Error && err.name === "AbortError") {
           stopStreaming();
@@ -87,15 +100,18 @@ export function useChat() {
     [
       sessionId,
       isStreaming,
+      needsApproval,
       addUserMessage,
       startStreaming,
       setSessionId,
       appendStreamText,
       addToolStart,
       addToolEnd,
+      setApproval,
       finalizeStream,
       stopStreaming,
       setError,
+      clearApproval,
     ],
   );
 
@@ -111,6 +127,8 @@ export function useChat() {
     streamingToolCalls,
     streamingToolName,
     error,
+    needsApproval,
+    approvalTools,
     send,
     abort,
     loadMessages,

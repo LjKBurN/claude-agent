@@ -119,10 +119,21 @@ class ContextManager:
         )
         messages = result.scalars().all()
 
-        return [
-            {"role": msg.role, "content": msg.content}
-            for msg in messages
-        ]
+        result_msgs = []
+        for msg in messages:
+            # HITL: 如果消息有 pending_approval，用结构化 content_blocks
+            if (
+                msg.meta_data
+                and "pending_approval" in msg.meta_data
+            ):
+                blocks = msg.meta_data["pending_approval"]["content_blocks"]
+                result_msgs.append({"role": msg.role, "content": blocks})
+            # 中间工具交换：meta_data.content_blocks 存储结构化内容
+            elif msg.meta_data and "content_blocks" in msg.meta_data:
+                result_msgs.append({"role": msg.role, "content": msg.meta_data["content_blocks"]})
+            else:
+                result_msgs.append({"role": msg.role, "content": msg.content})
+        return result_msgs
 
     async def get_messages_for_display(
         self,

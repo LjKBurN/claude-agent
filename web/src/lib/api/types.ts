@@ -15,6 +15,8 @@ export interface ChatResponse {
   session_id: string;
   message: string;
   tool_calls: ToolCall[];
+  needs_approval: boolean;
+  approval_info: { name: string; input: Record<string, unknown> }[] | null;
 }
 
 /** Session API types - mirrors backend/api/schemas/session.py */

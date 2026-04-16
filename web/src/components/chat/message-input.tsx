@@ -9,9 +9,10 @@ interface MessageInputProps {
   onSend: (text: string) => void;
   onAbort: () => void;
   isStreaming: boolean;
+  disabled?: boolean;
 }
 
-export function MessageInput({ onSend, onAbort, isStreaming }: MessageInputProps) {
+export function MessageInput({ onSend, onAbort, isStreaming, disabled }: MessageInputProps) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -54,7 +55,7 @@ export function MessageInput({ onSend, onAbort, isStreaming }: MessageInputProps
           placeholder="输入消息... (Enter 发送, Shift+Enter 换行)"
           className="min-h-[40px] max-h-[200px] resize-none"
           rows={1}
-          disabled={isStreaming}
+          disabled={isStreaming || disabled}
         />
         {isStreaming ? (
           <Button variant="destructive" size="icon" onClick={onAbort} className="shrink-0">

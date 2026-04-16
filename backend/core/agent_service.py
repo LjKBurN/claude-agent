@@ -158,6 +158,209 @@ class AgentService:
         # 未知工具：需要审批
         return False
 
+    def _get_dangerous_tools(self, content_blocks) -> list[dict]:
+        """从 LLM 响应中提取需要审批的 tool_use blocks。"""
+        mcp_tool_names = self._get_mcp_tool_names()
+        dangerous = []
+        for block in content_blocks:
+            if block.type != "tool_use":
+                continue
+            if not self._check_tool_permission(block.name, block.input, mcp_tool_names):
+                dangerous.append({
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+        return dangerous
+
+    @staticmethod
+    def _serialize_content_blocks(content_blocks) -> list[dict]:
+        """将 Anthropic content blocks 序列化为可 JSON 化的 dict 列表。"""
+        result = []
+        for block in content_blocks:
+            if hasattr(block, "text"):
+                result.append({"type": "text", "text": block.text})
+            elif hasattr(block, "type") and block.type == "tool_use":
+                result.append({
+                    "type": "tool_use",
+                    "id": block.id,
+                    "name": block.name,
+                    "input": block.input,
+                })
+            elif hasattr(block, "type") and block.type == "tool_result":
+                entry = {
+                    "type": "tool_result",
+                    "tool_use_id": block.tool_use_id,
+                    "content": block.content,
+                }
+                result.append(entry)
+        return result
+
+    async def _save_intermediate_messages(
+        self, db, session_id, messages, original_count
+    ):
+        """将 agent loop 中的中间工具交换保存到 DB。
+
+        assistant 消息: content=文本, meta_data.content_blocks=结构化内容
+        user 消息(tool_result): content="", meta_data.content_blocks=tool_result 列表
+        """
+        for msg in messages[original_count:]:
+            role = msg["role"]
+            content = msg["content"]
+            if isinstance(content, str):
+                await self._save_message(db, session_id, role, content)
+            elif isinstance(content, list):
+                if role == "assistant":
+                    text = self._extract_text(content)
+                    blocks = self._serialize_content_blocks(content)
+                else:
+                    text = ""
+                    blocks = content  # tool_results 已经是 dict 列表
+                m = Message(
+                    session_id=session_id, role=role, content=text,
+                    meta_data={"content_blocks": blocks},
+                )
+                db.add(m)
+        await db.flush()
+
+    async def _check_pending_approval(self, db, session_id):
+        """检查是否有等待审批的 tool_use。返回 content_blocks 或 None。"""
+        result = await db.execute(
+            select(Message)
+            .where(Message.session_id == session_id, Message.role == "assistant")
+            .order_by(Message.created_at.desc())
+            .limit(1)
+        )
+        last_msg = result.scalar_one_or_none()
+
+        if not last_msg:
+            logger.info(f"HITL check: no assistant msg for session {session_id[:8]}")
+            return None
+
+        has_meta = last_msg.meta_data is not None
+        has_pending = has_meta and "pending_approval" in last_msg.meta_data
+        logger.info(
+            f"HITL check: session={session_id[:8]}, msg_id={last_msg.id}, "
+            f"has_meta={has_meta}, has_pending={has_pending}, "
+            f"meta_keys={list(last_msg.meta_data.keys()) if has_meta else []}"
+        )
+
+        if has_pending:
+            return last_msg.meta_data["pending_approval"]["content_blocks"]
+        return None
+
+    @staticmethod
+    async def _save_approval_message(
+        db, session_id, text, content_blocks
+    ):
+        """保存带 pending_approval 标记的 assistant 消息。
+
+        content_blocks 已经是序列化后的 list[dict]，直接存储。
+        """
+        meta = {
+            "pending_approval": {
+                "content_blocks": content_blocks,
+            }
+        }
+        msg = Message(
+            session_id=session_id,
+            role="assistant",
+            content=text,
+            meta_data=meta,
+        )
+        db.add(msg)
+        await db.flush()
+
+    async def _clear_pending_approval(self, db, session_id):
+        """清除 pending approval 标记。"""
+        result = await db.execute(
+            select(Message)
+            .where(Message.session_id == session_id, Message.role == "assistant")
+            .order_by(Message.created_at.desc())
+            .limit(1)
+        )
+        pending_msg = result.scalar_one_or_none()
+        if pending_msg and pending_msg.meta_data:
+            pending_msg.meta_data = None
+
+    async def _build_resume_messages(
+        self, db, session, user_message, pending_blocks
+    ) -> list[dict]:
+        """构建 HITL 恢复所需的消息列表。
+
+        执行/拒绝 pending 工具，返回可直接传给 _run_agent / _run_agent_stream 的消息列表。
+        """
+        await self._save_message(db, session.id, "user", user_message)
+        await self._clear_pending_approval(db, session.id)
+
+        # 加载历史（DB 已包含中间工具交换），移除 pending assistant + user "确认"
+        all_messages = await self._get_messages(db, session.id)
+        logger.info(
+            f"HITL resume: loaded {len(all_messages)} messages from DB, "
+            f"user_message={user_message!r}"
+        )
+        messages = all_messages[:-2]
+        messages.append({"role": "assistant", "content": pending_blocks})
+
+        # 执行或拒绝 pending 工具
+        is_approved = "确认" in user_message or "confirm" in user_message.lower()
+        tool_results = []
+        for block in pending_blocks:
+            if block.get("type") != "tool_use":
+                continue
+            if is_approved:
+                output, _ = await self._execute_tool(
+                    tool_name=block["name"],
+                    tool_input=block["input"],
+                    tool_id=block["id"],
+                    messages=messages,
+                )
+                logger.info(
+                    f"HITL execute: tool={block['name']}, "
+                    f"output_len={len(output)}, output_preview={output[:200]!r}"
+                )
+            else:
+                output = f"用户取消了此操作。用户说：{user_message}"
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block["id"],
+                "content": output,
+            })
+
+        messages.append({"role": "user", "content": tool_results})
+        return messages
+
+    async def _handle_agent_result(
+        self, db, session, response_text, tool_calls, approval_info,
+        content_blocks, original_count=None, agent_messages=None,
+    ) -> ChatResponse:
+        """处理 agent 执行结果（保存消息，返回响应）。"""
+        if approval_info:
+            # 保存中间工具交换到 DB（在 pending 消息之前）
+            if agent_messages and original_count is not None:
+                await self._save_intermediate_messages(
+                    db, session.id, agent_messages, original_count
+                )
+            await self._save_approval_message(
+                db, session.id, response_text, content_blocks,
+            )
+            await db.commit()
+            return ChatResponse(
+                session_id=session.id,
+                message=response_text,
+                tool_calls=tool_calls,
+                needs_approval=True,
+                approval_info=approval_info,
+            )
+
+        await self._save_message(db, session.id, "assistant", response_text)
+        await db.commit()
+        return ChatResponse(
+            session_id=session.id,
+            message=response_text,
+            tool_calls=tool_calls,
+        )
+
     # ==================== 公开接口 ====================
 
     async def chat(
@@ -170,18 +373,23 @@ class AgentService:
         await self._ensure_mcp_initialized()
 
         session = await self._get_or_create_session(db, session_id)
-        await self._save_message(db, session.id, "user", user_message)
-        messages = await self._get_messages(db, session.id)
 
-        response_text, tool_calls = await self._run_agent(messages)
+        # HITL 恢复 或 正常流程
+        pending_blocks = await self._check_pending_approval(db, session.id)
+        if pending_blocks:
+            messages = await self._build_resume_messages(
+                db, session, user_message, pending_blocks
+            )
+        else:
+            await self._save_message(db, session.id, "user", user_message)
+            messages = await self._get_messages(db, session.id)
 
-        await self._save_message(db, session.id, "assistant", response_text)
-        await db.commit()
-
-        return ChatResponse(
-            session_id=session.id,
-            message=response_text,
-            tool_calls=tool_calls,
+        response_text, tool_calls, approval_info, content_blocks, original_count, agent_messages = (
+            await self._run_agent(messages)
+        )
+        return await self._handle_agent_result(
+            db, session, response_text, tool_calls, approval_info,
+            content_blocks, original_count, agent_messages,
         )
 
     async def chat_stream(
@@ -194,9 +402,28 @@ class AgentService:
         await self._ensure_mcp_initialized()
 
         session = await self._get_or_create_session(db, session_id)
-        await self._save_message(db, session.id, "user", user_message)
-        messages = await self._get_messages(db, session.id)
+        logger.info(
+            f"chat_stream: user_message={user_message!r}, "
+            f"session_id={session.id[:8]}, request_sid={session_id[:8] if session_id else None}"
+        )
 
+        # HITL 恢复 或 正常流程
+        pending_blocks = await self._check_pending_approval(db, session.id)
+        if pending_blocks:
+            messages = await self._build_resume_messages(
+                db, session, user_message, pending_blocks
+            )
+        else:
+            await self._save_message(db, session.id, "user", user_message)
+            messages = await self._get_messages(db, session.id)
+
+        async for event in self._stream_agent_response(db, session, messages):
+            yield event
+
+    async def _stream_agent_response(
+        self, db, session, messages
+    ) -> AsyncGenerator[str, None]:
+        """运行 agent 流式响应并 yield SSE 事件（流式共用逻辑）。"""
         yield self._sse_event("session_id", {"session_id": session.id})
 
         full_response = ""
@@ -224,6 +451,21 @@ class AgentService:
                     "count": event["count"],
                     "tools": event["tools"],
                 })
+            elif event["type"] == "approval_needed":
+                # 保存中间工具交换到 DB（在 pending 消息之前）
+                await self._save_intermediate_messages(
+                    db, session.id, event["messages"], event["original_count"]
+                )
+                await self._save_approval_message(
+                    db, session.id, full_response, event["content_blocks"]
+                )
+                await db.commit()
+                yield self._sse_event("approval_needed", {
+                    "message": full_response,
+                    "tools": event["tools"],
+                })
+                yield self._sse_event("done", {"status": "needs_approval"})
+                return
 
         await self._save_message(db, session.id, "assistant", full_response)
         await db.commit()
@@ -351,24 +593,40 @@ class AgentService:
 
     async def _run_agent(
         self, messages: list[dict]
-    ) -> tuple[str, list[ToolCall]]:
-        """运行 Agent（非流式）。"""
+    ) -> tuple[str, list[ToolCall], list[dict] | None, list[dict] | None,
+                int, list[dict]]:
+        """运行 Agent（非流式）。
+
+        Returns:
+            (text, tool_calls, approval_info, content_blocks, original_count, messages)
+        """
         from anthropic import Anthropic
 
         client = Anthropic(**self._get_client_kwargs())
         tools = self._get_all_tools()
         tool_calls: list[ToolCall] = []
         system = "You are a helpful assistant."
+        original_count = len(messages)
 
-        for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
-            # API 调用带重试
+        for _ in range(MAX_TOOL_ITERATIONS):
             try:
                 response = await self._call_with_retry(client, messages, tools, system)
             except Exception as e:
                 logger.error(f"API call failed after retries: {e}")
-                return f"[Error] API 调用失败: {type(e).__name__}", tool_calls
+                return f"[Error] API 调用失败: {type(e).__name__}", tool_calls, None, None, original_count, messages
 
             if response.stop_reason == "tool_use":
+                # HITL: 检查是否有 dangerous 工具
+                dangerous = self._get_dangerous_tools(response.content)
+                if dangerous:
+                    text = self._extract_text(response.content)
+                    serialized = self._serialize_content_blocks(response.content)
+                    tool_names = [t["name"] for t in dangerous]
+                    logger.info(
+                        f"HITL: {len(dangerous)} tool(s) need approval: {tool_names}"
+                    )
+                    return text, tool_calls, dangerous, serialized, original_count, messages
+
                 messages.append({"role": "assistant", "content": response.content})
                 tool_results, new_tools = await self._process_tool_calls(
                     response.content, tool_calls, messages, tools
@@ -379,29 +637,34 @@ class AgentService:
 
             elif response.stop_reason == "end_turn":
                 text = self._extract_text(response.content)
-                return text, tool_calls
+                return text, tool_calls, None, None, original_count, messages
 
             else:
                 text = self._extract_text(response.content)
-                return text or f"Stopped: {response.stop_reason}", tool_calls
+                return text or f"Stopped: {response.stop_reason}", tool_calls, None, None, original_count, messages
 
         logger.warning(f"Agent reached max iterations ({MAX_TOOL_ITERATIONS})")
-        return "[Error] Agent 达到最大工具调用次数，请简化请求", tool_calls
+        return "[Error] Agent 达到最大工具调用次数，请简化请求", tool_calls, None, None, original_count, messages
 
     async def _run_agent_stream(
         self, messages: list[dict]
     ) -> AsyncGenerator[dict, None]:
-        """运行 Agent（流式）。"""
+        """运行 Agent（流式）。
+
+        流式期间只收集 tool_use 信息（不执行），流结束后：
+        1. HITL 检查 — 有 dangerous 工具则退出等待审批
+        2. 全部安全 — 执行工具，yield tool_end 事件，继续循环
+        """
         from anthropic import Anthropic
 
         client = Anthropic(**self._get_client_kwargs())
-        tools = self._get_all_tools()
+        all_tools = self._get_all_tools()
         system = "You are a helpful assistant."
+        original_count = len(messages)
 
-        for iteration in range(1, MAX_TOOL_ITERATIONS + 1):
-            # API 流式调用带重试
+        for _ in range(MAX_TOOL_ITERATIONS):
             try:
-                stream_ctx = await self._stream_with_retry(client, messages, tools, system)
+                stream_ctx = await self._stream_with_retry(client, messages, all_tools, system)
             except Exception as e:
                 logger.error(f"API stream failed after retries: {e}")
                 yield {"type": "text", "content": f"[Error] API 调用失败: {type(e).__name__}"}
@@ -425,29 +688,84 @@ class AgentService:
                                 }
                                 yield {
                                     "type": "tool_start",
-                                    "name": event.content_block.name
+                                    "name": event.content_block.name,
                                 }
 
                     elif event.type == "content_block_stop":
-                        if current_tool:
-                            for evt in await self._process_stream_tool(
-                                current_tool, messages, tools
-                            ):
-                                yield evt
-                            current_tool = None
+                        # 不在流式期间执行工具，只缓冲
+                        current_tool = None
 
                 final_message = stream.get_final_message()
 
                 if final_message.stop_reason == "tool_use":
-                    tool_results, new_tools = await self._build_tool_results_from_final(
-                        final_message.content
+                    # HITL: 先检查是否有 dangerous 工具
+                    dangerous = self._get_dangerous_tools(final_message.content)
+                    tool_names_in_response = [
+                        b.name for b in final_message.content
+                        if hasattr(b, "type") and b.type == "tool_use"
+                    ]
+                    logger.info(
+                        f"Agent stop_reason=tool_use, all_tools={tool_names_in_response}, "
+                        f"dangerous={[t['name'] for t in dangerous] if dangerous else []}, "
+                        f"msg_count={len(messages)}, original_count={original_count}"
                     )
-                    if new_tools:
-                        tools.extend(new_tools)
+                    if dangerous:
+                        tool_names = [t["name"] for t in dangerous]
+                        logger.info(
+                            f"HITL stream: {len(dangerous)} tool(s) need approval: {tool_names}"
+                        )
+                        yield {
+                            "type": "approval_needed",
+                            "content_blocks": self._serialize_content_blocks(
+                                final_message.content
+                            ),
+                            "tools": dangerous,
+                            "messages": messages,
+                            "original_count": original_count,
+                        }
+                        return
+
+                    # 全部安全：执行工具并 yield 结果
                     messages.append({
                         "role": "assistant",
-                        "content": final_message.content
+                        "content": final_message.content,
                     })
+                    tool_results = []
+                    for block in final_message.content:
+                        if block.type != "tool_use":
+                            continue
+
+                        output, extra_events = await self._execute_tool(
+                            tool_name=block.name,
+                            tool_input=block.input,
+                            tool_id=block.id,
+                            messages=messages,
+                            tools=all_tools,
+                        )
+
+                        # 处理 MCP Search 等动态工具注册
+                        if extra_events:
+                            for evt in extra_events:
+                                yield evt
+                                if evt.get("type") == "mcp_tools_loaded" and evt.get("tools"):
+                                    pass  # tools already extended in _execute_tool
+
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": output,
+                        })
+
+                        # yield tool_end 事件给前端
+                        yield {
+                            "type": "tool_end",
+                            "tool_call": ToolCall(
+                                name=block.name,
+                                input=block.input,
+                                output=output,
+                            ),
+                        }
+
                     messages.append({"role": "user", "content": tool_results})
                 else:
                     return
@@ -486,12 +804,11 @@ class AgentService:
         """
         mcp_tool_names = self._get_mcp_tool_names()
 
-        # 权限检查
+        # 权限检查（兜底：正常情况 HITL 已在 agent loop 层拦截）
         is_safe = self._check_tool_permission(tool_name, tool_input, mcp_tool_names)
         if not is_safe:
-            # TODO: HITL 实现后替换为退出循环返回审批信息
             logger.warning(
-                f"Tool '{tool_name}' requires approval (auto-approved for now)"
+                f"Tool '{tool_name}' bypassed HITL check (should not happen)"
             )
 
         try:
@@ -576,68 +893,6 @@ class AgentService:
                 input=block.input,
                 output=output,
             ))
-
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": block.id,
-                "content": output,
-            })
-
-        return results, new_tools
-
-    async def _process_stream_tool(
-        self,
-        current_tool: dict,
-        messages: list[dict],
-        tools: list[dict],
-    ) -> list[dict]:
-        """处理流式工具调用。"""
-        try:
-            input_data = json.loads(current_tool["input"])
-        except json.JSONDecodeError:
-            input_data = {}
-
-        output, extra_events = await self._execute_tool(
-            tool_name=current_tool["name"],
-            tool_input=input_data,
-            tool_id=current_tool["id"],
-            messages=messages,
-            tools=tools,
-        )
-
-        events = extra_events or []
-        events.append({
-            "type": "tool_end",
-            "tool_call": ToolCall(
-                name=current_tool["name"],
-                input=input_data,
-                output=output,
-            )
-        })
-
-        return events
-
-    async def _build_tool_results_from_final(
-        self, content_blocks
-    ) -> tuple[list[dict], list[dict]]:
-        """从 final_message 构建工具结果。
-
-        Returns:
-            (tool_results, new_tools) - 工具结果列表和需要注册的新工具
-        """
-        results = []
-        new_tools = []
-
-        for block in content_blocks:
-            if block.type != "tool_use":
-                continue
-
-            output, _ = await self._execute_tool(
-                tool_name=block.name,
-                tool_input=block.input,
-                tool_id=block.id,
-                messages=[],
-            )
 
             results.append({
                 "type": "tool_result",

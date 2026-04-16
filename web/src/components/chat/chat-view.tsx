@@ -3,6 +3,7 @@
 import { useChat } from "@/lib/hooks/use-chat";
 import { MessageList } from "./message-list";
 import { MessageInput } from "./message-input";
+import { ApprovalBanner } from "./approval-banner";
 import { AlertCircle } from "lucide-react";
 
 interface ChatViewProps {
@@ -11,9 +12,6 @@ interface ChatViewProps {
 
 export function ChatView({ sessionId }: ChatViewProps) {
   const chat = useChat();
-
-  // If we have a sessionId prop, set it
-  // (handled by the page component via loadMessages)
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
@@ -33,10 +31,16 @@ export function ChatView({ sessionId }: ChatViewProps) {
         streamingToolName={chat.streamingToolName}
       />
 
+      {/* Approval banner */}
+      {chat.needsApproval && chat.approvalTools.length > 0 && (
+        <ApprovalBanner tools={chat.approvalTools} onApprove={() => chat.send("确认")} onReject={() => chat.send("取消执行")} />
+      )}
+
       <MessageInput
         onSend={chat.send}
         onAbort={chat.abort}
         isStreaming={chat.isStreaming}
+        disabled={chat.needsApproval}
       />
     </div>
   );
