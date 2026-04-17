@@ -80,75 +80,23 @@ class SkillRegistry:
             if not skill.disable_model_invocation and skill.description
         ]
 
-    def get_skill_tool_description(self, max_chars: int = 15000) -> str:
-        """生成 Skill tool 的 description 字段。
-
-        这个描述会被注入到 tools 数组中，让 Claude 知道有哪些 skills 可用。
-
-        Args:
-            max_chars: 最大字符数限制
-
-        Returns:
-            格式化的 Skill tool description
-        """
-        skills = self.list_for_tool()
-
-        # 分离 mode commands 和 regular skills
-        mode_commands = [s for s in skills if s.mode]
-        regular_skills = [s for s in skills if not s.mode]
-
-        # 构建可用 skills 列表
-        skills_lines = []
-
-        if mode_commands:
-            skills_lines.append("## Mode Commands")
-            for skill in mode_commands:
-                skills_lines.append(skill.get_full_description())
-            skills_lines.append("")
-
-        if regular_skills:
-            skills_lines.append("## Available Skills")
-            for skill in regular_skills:
-                skills_lines.append(skill.get_full_description())
-
-        skills_list = "\n".join(skills_lines)
-
-        # 检查字符限制
-        if len(skills_list) > max_chars:
-            # 截断并添加提示
-            skills_list = skills_list[:max_chars] + "\n... (more skills available)"
-
-        return f"""Execute a skill within the main conversation.
-
-<skills_instructions>
-When users ask you to perform tasks, check if any of the available skills
-below can help complete the task more effectively. Skills provide specialized
-capabilities and domain knowledge.
-
-How to use skills:
-- Invoke skills using this tool with the skill name only (no arguments)
-- When you invoke a skill, you will see a loading message
-- The skill's prompt will expand and provide detailed instructions
-- Examples:
-  - `command: "code_review"` - invoke the code_review skill
-  - `command: "doc_gen"` - invoke the doc_gen skill
-
-Important:
-- Only use skills listed in <available_skills> below
-- Do not invoke a skill that is already running
-- Do not use this tool for built-in CLI commands (like /help, /clear, etc.)
-</skills_instructions>
-
-<available_skills>
-{skills_list}
-</available_skills>
-"""
-
     def get_skill_tool_definition(self) -> dict:
-        """获取 Skill tool 的完整定义（用于 tools 数组）。"""
+        """Skill tool 定义 — 精简的调用接口。
+
+        Skill 元数据（名称、描述、列表）已迁移到 system prompt 的 skills_summary section。
+        此处仅定义调用方式。
+        """
         return {
             "name": "Skill",
-            "description": self.get_skill_tool_description(),
+            "description": (
+                "Execute a skill within the main conversation.\n"
+                "Invoke a skill by passing its name as the command parameter.\n"
+                "The skill's prompt will expand and provide detailed instructions.\n"
+                "Only use skills listed in the <skills_summary> section of your "
+                "system instructions.\n"
+                "Do not invoke a skill that is already running.\n"
+                "Do not use this tool for built-in CLI commands."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {

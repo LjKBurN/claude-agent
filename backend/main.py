@@ -37,7 +37,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Claude Agent API",
-        description="企业级 AI Agent 服务",
+        description="AI Agent 服务",
         version="0.1.0",
         lifespan=lifespan,
     )

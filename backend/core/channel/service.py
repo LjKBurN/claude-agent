@@ -176,6 +176,7 @@ class ChannelService:
                     user_message=user_text,
                     session_id=agent_session_id,
                     db=db,
+                    channel="wechat",
                 )
 
             logger.info(

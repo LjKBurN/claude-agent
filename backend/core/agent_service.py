@@ -18,6 +18,7 @@ from backend.core.tools import get_tools
 from backend.core.tool_executor import tool_executor
 from backend.core.mcp.manager import mcp_manager
 from backend.core.context.manager import context_manager
+from backend.core.prompt import PromptContext, get_system_prompt_builder
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +71,21 @@ class AgentService:
         if self.settings.anthropic_base_url:
             kwargs["base_url"] = self.settings.anthropic_base_url
         return kwargs
+
+    def _build_system_prompt(self, channel: str = "web") -> str:
+        """构建 system prompt。"""
+        builder = get_system_prompt_builder()
+        skills = skill_registry.list_for_tool()
+        mcp_tool_names = self._get_mcp_tool_names()
+        _, lazy_mode = mcp_manager.get_tools_for_api()
+
+        context = PromptContext(
+            channel=channel,
+            skills=skills,
+            mcp_tool_names=mcp_tool_names,
+            mcp_lazy_mode=lazy_mode,
+        )
+        return builder.build(context)
 
     # ==================== 错误恢复 ====================
 
@@ -151,9 +167,9 @@ class AgentService:
         if tool:
             return tool.is_safe(tool_input)
 
-        # MCP 动态工具：默认需要审批
+        # MCP 动态工具：自动执行
         if tool_name in mcp_tool_names:
-            return False
+            return True
 
         # 未知工具：需要审批
         return False
@@ -368,6 +384,7 @@ class AgentService:
         user_message: str,
         session_id: str | None,
         db: AsyncSession,
+        channel: str = "web",
     ) -> ChatResponse:
         """处理聊天请求（非流式）。"""
         await self._ensure_mcp_initialized()
@@ -385,7 +402,7 @@ class AgentService:
             messages = await self._get_messages(db, session.id)
 
         response_text, tool_calls, approval_info, content_blocks, original_count, agent_messages = (
-            await self._run_agent(messages)
+            await self._run_agent(messages, channel=channel)
         )
         return await self._handle_agent_result(
             db, session, response_text, tool_calls, approval_info,
@@ -397,6 +414,7 @@ class AgentService:
         user_message: str,
         session_id: str | None,
         db: AsyncSession,
+        channel: str = "web",
     ) -> AsyncGenerator[str, None]:
         """处理聊天请求（流式）。"""
         await self._ensure_mcp_initialized()
@@ -417,11 +435,11 @@ class AgentService:
             await self._save_message(db, session.id, "user", user_message)
             messages = await self._get_messages(db, session.id)
 
-        async for event in self._stream_agent_response(db, session, messages):
+        async for event in self._stream_agent_response(db, session, messages, channel=channel):
             yield event
 
     async def _stream_agent_response(
-        self, db, session, messages
+        self, db, session, messages, *, channel: str = "web"
     ) -> AsyncGenerator[str, None]:
         """运行 agent 流式响应并 yield SSE 事件（流式共用逻辑）。"""
         yield self._sse_event("session_id", {"session_id": session.id})
@@ -429,7 +447,7 @@ class AgentService:
         full_response = ""
         tool_calls: list[ToolCall] = []
 
-        async for event in self._run_agent_stream(messages):
+        async for event in self._run_agent_stream(messages, channel=channel):
             if event["type"] == "text":
                 full_response += event["content"]
                 yield self._sse_event("text", {"content": event["content"]})
@@ -592,7 +610,7 @@ class AgentService:
     # ==================== Agent 执行 ====================
 
     async def _run_agent(
-        self, messages: list[dict]
+        self, messages: list[dict], *, channel: str = "web"
     ) -> tuple[str, list[ToolCall], list[dict] | None, list[dict] | None,
                 int, list[dict]]:
         """运行 Agent（非流式）。
@@ -605,7 +623,7 @@ class AgentService:
         client = Anthropic(**self._get_client_kwargs())
         tools = self._get_all_tools()
         tool_calls: list[ToolCall] = []
-        system = "You are a helpful assistant."
+        system = self._build_system_prompt(channel)
         original_count = len(messages)
 
         for _ in range(MAX_TOOL_ITERATIONS):
@@ -647,7 +665,7 @@ class AgentService:
         return "[Error] Agent 达到最大工具调用次数，请简化请求", tool_calls, None, None, original_count, messages
 
     async def _run_agent_stream(
-        self, messages: list[dict]
+        self, messages: list[dict], *, channel: str = "web"
     ) -> AsyncGenerator[dict, None]:
         """运行 Agent（流式）。
 
@@ -659,7 +677,7 @@ class AgentService:
 
         client = Anthropic(**self._get_client_kwargs())
         all_tools = self._get_all_tools()
-        system = "You are a helpful assistant."
+        system = self._build_system_prompt(channel)
         original_count = len(messages)
 
         for _ in range(MAX_TOOL_ITERATIONS):
