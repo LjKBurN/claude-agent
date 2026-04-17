@@ -19,9 +19,11 @@ interface ChatState {
   error: string | null;
   needsApproval: boolean;
   approvalTools: { name: string; input: Record<string, unknown> }[];
+  currentAgentId: string | null;
 
   // Actions
   setSessionId: (id: string | null) => void;
+  setCurrentAgentId: (id: string | null) => void;
   addUserMessage: (content: string) => void;
   appendStreamText: (chunk: string) => void;
   addToolStart: (name: string) => void;
@@ -46,8 +48,11 @@ export const useChatStore = create<ChatState>((set) => ({
   error: null,
   needsApproval: false,
   approvalTools: [],
+  currentAgentId: null,
 
   setSessionId: (id) => set({ sessionId: id }),
+
+  setCurrentAgentId: (id) => set({ currentAgentId: id }),
 
   addUserMessage: (content) =>
     set((state) => ({

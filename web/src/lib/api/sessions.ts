@@ -4,11 +4,13 @@ import type { SessionList, MessageList } from "./types";
 export function listSessions(params?: {
   limit?: number;
   offset?: number;
+  agent_config_id?: string | null;
   signal?: AbortSignal;
 }) {
   const searchParams = new URLSearchParams();
   if (params?.limit) searchParams.set("limit", String(params.limit));
   if (params?.offset) searchParams.set("offset", String(params.offset));
+  if (params?.agent_config_id) searchParams.set("agent_config_id", params.agent_config_id);
 
   const qs = searchParams.toString();
   return request<SessionList>(

@@ -30,6 +30,9 @@ htmlcov/
 # Logs
 *.log
 
+# Data (SQLite databases, runtime data)
+data/
+
 # Node / Next.js
 node_modules/
 .next/

@@ -4,7 +4,8 @@ import { useChat } from "@/lib/hooks/use-chat";
 import { MessageList } from "./message-list";
 import { MessageInput } from "./message-input";
 import { ApprovalBanner } from "./approval-banner";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Bot } from "lucide-react";
+import { useAgentConfigs } from "@/lib/hooks/use-agent-configs";
 
 interface ChatViewProps {
   sessionId?: string;
@@ -12,9 +13,24 @@ interface ChatViewProps {
 
 export function ChatView({ sessionId }: ChatViewProps) {
   const chat = useChat();
+  const { configs } = useAgentConfigs();
+  const currentAgent = configs.find((c) => c.id === chat.currentAgentId);
 
   return (
     <div className="flex flex-1 flex-col min-h-0">
+      {/* Current Agent indicator */}
+      {currentAgent && (
+        <div className="flex items-center gap-2 border-b bg-muted/30 px-4 py-1.5 text-xs text-muted-foreground">
+          <span>{currentAgent.avatar || <Bot className="h-3 w-3" />}</span>
+          <span>{currentAgent.name}</span>
+          {currentAgent.builtin_tools.length > 0 && (
+            <span className="text-muted-foreground/60">
+              ({currentAgent.builtin_tools.length} 工具)
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Error bar */}
       {chat.error && (
         <div className="flex items-center gap-2 border-b bg-destructive/10 px-4 py-2 text-sm text-destructive">

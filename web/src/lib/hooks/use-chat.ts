@@ -18,7 +18,9 @@ export function useChat() {
     error,
     needsApproval,
     approvalTools,
+    currentAgentId,
     setSessionId,
+    setCurrentAgentId,
     addUserMessage,
     appendStreamText,
     addToolStart,
@@ -50,7 +52,7 @@ export function useChat() {
 
       try {
         const stream = await sendMessageStream(
-          { message: text, session_id: sessionId },
+          { message: text, session_id: sessionId, agent_config_id: currentAgentId },
           abort.signal,
         );
 
@@ -101,6 +103,7 @@ export function useChat() {
       sessionId,
       isStreaming,
       needsApproval,
+      currentAgentId,
       addUserMessage,
       startStreaming,
       setSessionId,
@@ -129,10 +132,12 @@ export function useChat() {
     error,
     needsApproval,
     approvalTools,
+    currentAgentId,
     send,
     abort,
     loadMessages,
     reset,
     setSessionId,
+    setCurrentAgentId,
   };
 }

@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ThemeToggle } from "./theme-toggle";
 import { SidebarSessions } from "./sidebar-sessions";
+import { AgentSelector } from "./agent-selector";
 import { SkillsPanel } from "@/components/chat/skills-panel";
 
 export function Sidebar() {
@@ -32,6 +33,9 @@ export function Sidebar() {
           </Button>
         </Link>
       </div>
+
+      {/* Agent Selector */}
+      <AgentSelector />
 
       <Separator />
 

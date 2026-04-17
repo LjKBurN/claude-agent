@@ -14,7 +14,7 @@ export function useSessions() {
   } = useSWR<{ sessions: SessionInfo[]; total: number }>(
     "/api/sessions",
     () => listSessions({ limit: 30 }),
-    { revalidateOnFocus: true },
+    { revalidateOnFocus: false },
   );
 
   const remove = useCallback(

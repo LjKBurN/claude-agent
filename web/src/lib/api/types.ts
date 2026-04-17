@@ -3,6 +3,7 @@
 export interface ChatRequest {
   message: string;
   session_id?: string | null;
+  agent_config_id?: string | null;
 }
 
 export interface ToolCall {
@@ -26,6 +27,8 @@ export interface SessionInfo {
   created_at: string;
   updated_at: string;
   message_count: number;
+  agent_config_id: string | null;
+  agent_name: string | null;
 }
 
 export interface SessionList {
@@ -114,4 +117,63 @@ export interface ChannelSessionInfo {
   agent_session_id: string;
   context_data: Record<string, unknown> | null;
   last_active_at: string;
+}
+
+/** Agent Config API types - mirrors backend/api/schemas/agent_config.py */
+
+export interface AgentConfigInfo {
+  id: string;
+  name: string;
+  description: string;
+  model_id: string;
+  max_tokens: number;
+  builtin_tools: string[];
+  include_skills: boolean;
+  include_mcp: boolean;
+  mcp_servers: string[];
+  max_iterations: number;
+  tool_timeout: number;
+  auto_approve_safe: boolean;
+  system_prompt_overrides: Record<string, string>;
+  avatar: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentConfigList {
+  configs: AgentConfigInfo[];
+  total: number;
+}
+
+export interface CreateAgentConfigRequest {
+  name: string;
+  description?: string;
+  model_id?: string;
+  max_tokens?: number;
+  builtin_tools?: string[];
+  include_skills?: boolean;
+  include_mcp?: boolean;
+  mcp_servers?: string[];
+  max_iterations?: number;
+  tool_timeout?: number;
+  auto_approve_safe?: boolean;
+  system_prompt_overrides?: Record<string, string>;
+  avatar?: string;
+}
+
+export type UpdateAgentConfigRequest = Partial<CreateAgentConfigRequest>;
+
+/** Tools API types */
+
+export interface ToolInfo {
+  name: string;
+  description: string;
+  source: string;
+  permission: string;
+}
+
+export interface ToolsListResponse {
+  tools: ToolInfo[];
+  builtin: ToolInfo[];
+  mcp: ToolInfo[];
 }
