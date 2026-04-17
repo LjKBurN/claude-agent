@@ -9,6 +9,9 @@ class ChatRequest(BaseModel):
     """聊天请求。"""
     message: str = Field(..., description="用户消息")
     session_id: str | None = Field(None, description="会话 ID，不传则创建新会话")
+    agent_config_id: str | None = Field(
+        None, description="Agent 配置 ID，仅创建新会话时生效"
+    )
 
 
 class ToolCall(BaseModel):

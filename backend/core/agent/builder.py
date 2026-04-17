@@ -1,0 +1,147 @@
+"""AgentBuilder — 配置驱动的 Agent 组装。
+
+Web 端通过 AgentConfig 声明式配置，AgentBuilder 组装出可运行的 AgentLoop。
+这是实现"Web 端拼装 Agent"的核心入口。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from backend.core.agent.approval import ApprovalManager
+from backend.core.agent.events import EventBus
+from backend.core.agent.llm import LLMConfig
+from backend.core.agent.llm.anthropic_provider import AnthropicProvider
+from backend.core.agent.loop import AgentLoop
+from backend.core.tools.registry import UnifiedToolRegistry, populate_registry
+
+
+@dataclass
+class AgentConfig:
+    """Agent 的声明性配置。
+
+    可从 JSON 构建，实现 Web UI 驱动的 Agent 创建。
+    """
+
+    name: str = "default"
+    description: str = ""
+
+    # LLM 配置
+    model_id: str = "claude-sonnet-4-6-20250514"
+    max_tokens: int = 8000
+
+    # 工具选择
+    builtin_tools: list[str] = field(default_factory=list)  # 空 = 全部
+    include_skills: bool = True
+    include_mcp: bool = True
+    mcp_servers: list[str] = field(default_factory=list)  # 空 = 全部
+
+    # 行为
+    max_iterations: int = 20
+    tool_timeout: int = 120
+    request_timeout: int = 300
+    auto_approve_safe: bool = True
+
+    # 提示词自定义
+    system_prompt_overrides: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AgentConfig:
+        """从字典创建配置（Web API 请求体）。"""
+        return cls(
+            name=data.get("name", "default"),
+            description=data.get("description", ""),
+            model_id=data.get("model_id", "claude-sonnet-4-6-20250514"),
+            max_tokens=data.get("max_tokens", 8000),
+            builtin_tools=data.get("builtin_tools", []),
+            include_skills=data.get("include_skills", True),
+            include_mcp=data.get("include_mcp", True),
+            mcp_servers=data.get("mcp_servers", []),
+            max_iterations=data.get("max_iterations", 20),
+            tool_timeout=data.get("tool_timeout", 120),
+            request_timeout=data.get("request_timeout", 300),
+            system_prompt_overrides=data.get("system_prompt_overrides", {}),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """序列化为字典（存储/返回给前端）。"""
+        return {
+            "name": self.name,
+            "description": self.description,
+            "model_id": self.model_id,
+            "max_tokens": self.max_tokens,
+            "builtin_tools": self.builtin_tools,
+            "include_skills": self.include_skills,
+            "include_mcp": self.include_mcp,
+            "mcp_servers": self.mcp_servers,
+            "max_iterations": self.max_iterations,
+            "tool_timeout": self.tool_timeout,
+            "request_timeout": self.request_timeout,
+            "system_prompt_overrides": self.system_prompt_overrides,
+        }
+
+
+class AgentBuilder:
+    """从 AgentConfig 组装 AgentLoop。
+
+    用法：
+        config = AgentConfig(name="code-assistant", builtin_tools=["bash", "read_file"])
+        loop = AgentBuilder(config).build()
+        result = await loop.run(messages, system_prompt)
+    """
+
+    def __init__(self, config: AgentConfig):
+        self.config = config
+
+    def build(self, api_key: str = "", base_url: str | None = None) -> AgentLoop:
+        """从配置组装 AgentLoop。
+
+        Args:
+            api_key: LLM API Key（运行时注入，不存储在配置中）
+            base_url: LLM API Base URL（可选）
+        """
+        # 1. 构建 LLM Provider
+        llm = self._build_llm(api_key, base_url)
+
+        # 2. 构建工具注册表
+        registry = self._build_registry()
+
+        # 3. 构建审批管理器
+        approval = ApprovalManager(registry)
+
+        # 4. 构建事件总线
+        event_bus = EventBus()
+
+        return AgentLoop(
+            llm=llm,
+            registry=registry,
+            events=event_bus,
+            approval=approval,
+            max_iterations=self.config.max_iterations,
+            tool_timeout=self.config.tool_timeout,
+            request_timeout=self.config.request_timeout,
+        )
+
+    def _build_llm(self, api_key: str, base_url: str | None) -> Any:
+        """根据配置创建 LLM Provider。"""
+        config = LLMConfig(
+            model_id=self.config.model_id,
+            api_key=api_key,
+            base_url=base_url,
+            max_tokens=self.config.max_tokens,
+        )
+        return AnthropicProvider(config)
+
+    def _build_registry(self) -> UnifiedToolRegistry:
+        """根据配置选择性地构建工具注册表。"""
+        # 使用 builtin_only 参数过滤内置工具
+        builtin_only = self.config.builtin_tools if self.config.builtin_tools else None
+
+        registry = populate_registry(
+            builtin_only=builtin_only,
+            include_skills=self.config.include_skills,
+            include_mcp=self.config.include_mcp,
+        )
+
+        return registry

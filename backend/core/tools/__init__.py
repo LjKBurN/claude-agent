@@ -5,14 +5,13 @@
 
 # 导入所有工具模块以触发注册
 from backend.core.tools import bash, file, http, search, task  # noqa: F401
-
 from backend.core.tools.base import (
-    Tool,
     get_all_tools,
     get_tool,
     get_tools_anthropic_format,
     handle_tool_call,
 )
+from backend.core.tools.registry import ToolDescriptor
 
 
 # 兼容旧接口
@@ -22,7 +21,7 @@ def get_tools() -> list[dict]:
 
 
 __all__ = [
-    "Tool",
+    "ToolDescriptor",
     "get_tool",
     "get_all_tools",
     "get_tools",

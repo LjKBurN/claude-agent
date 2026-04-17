@@ -12,8 +12,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.core.context.token_counter import get_token_counter
 from backend.db.models import Message
-from backend.core.context.token_counter import TokenCounter, get_token_counter
 
 
 class ContextManager:
@@ -59,8 +59,6 @@ class ContextManager:
     # 工具结果清理配置
     DEFAULT_CLEAR_TOOL_THRESHOLD = 80000  # 80K tokens 触发清理
     DEFAULT_KEEP_RECENT_TOOLS = 4  # 保留最近 4 个工具结果
-    # 工具结果清理占位符
-    CLEARED_PLACEHOLDER = "[cleared to save context]"
 
     # 可重新获取的工具名称（这些工具的结果可以安全清理）
     REFETCHABLE_TOOLS = {
@@ -113,7 +111,7 @@ class ContextManager:
             .where(Message.session_id == session_id)
             .where(
                 # 包含摘要消息 或 未被压缩的消息
-                (Message.role == self.SUMMARY_ROLE) | (Message.is_summarized == False)
+                (Message.role == self.SUMMARY_ROLE) | (~Message.is_summarized)
             )
             .order_by(Message.created_at)
         )
@@ -154,7 +152,7 @@ class ContextManager:
         query = select(Message).where(Message.session_id == session_id)
 
         if not include_summarized:
-            query = query.where(Message.is_summarized == False)
+            query = query.where(~Message.is_summarized)
 
         query = query.order_by(Message.created_at)
 
@@ -191,7 +189,7 @@ class ContextManager:
         result = await db.execute(
             select(Message)
             .where(Message.session_id == session_id)
-            .where(Message.is_summarized == False)
+            .where(~Message.is_summarized)
             .where(Message.role != self.SUMMARY_ROLE)
             .order_by(Message.created_at)
         )
@@ -213,6 +211,7 @@ class ContextManager:
         self,
         db: AsyncSession,
         session_id: str,
+        llm_provider: Any = None,
         llm_client: Any = None,
         keep_recent_tokens: int | None = None,
         keep_recent: int | None = None,
@@ -227,7 +226,8 @@ class ContextManager:
         Args:
             db: 数据库会话
             session_id: 会话 ID
-            llm_client: LLM 客户端（用于生成摘要）
+            llm_provider: LLMProvider 实例（用于生成摘要，优先使用）
+            llm_client: Anthropic 客户端（向后兼容，已弃用）
             keep_recent_tokens: 保留的近期消息 token 预算（优先）
             keep_recent: 保留的近期消息数量（备选）
 
@@ -238,7 +238,7 @@ class ContextManager:
         result = await db.execute(
             select(Message)
             .where(Message.session_id == session_id)
-            .where(Message.is_summarized == False)
+            .where(~Message.is_summarized)
             .where(Message.role != self.SUMMARY_ROLE)
             .order_by(Message.created_at)
         )
@@ -284,7 +284,10 @@ class ContextManager:
             }
 
         # 3. 生成摘要
-        summary_content = await self._generate_summary(to_compress, llm_client)
+        provider = llm_provider or llm_client
+        summary_content = await self._generate_summary(
+            to_compress, provider, is_provider=bool(llm_provider)
+        )
 
         # 4. 标记旧消息为已压缩
         compressed_ids = []
@@ -375,12 +378,14 @@ class ContextManager:
         self,
         messages: list[Message],
         llm_client: Any = None,
+        is_provider: bool = False,
     ) -> str:
         """生成对话摘要。
 
         Args:
             messages: 要压缩的消息列表
-            llm_client: LLM 客户端
+            llm_client: LLM 客户端（LLMProvider 或 Anthropic 客户端）
+            is_provider: 是否为 LLMProvider 实例
 
         Returns:
             摘要内容
@@ -390,7 +395,7 @@ class ContextManager:
 
         # 如果有 LLM 客户端，使用 LLM 生成摘要
         if llm_client:
-            return await self._generate_llm_summary(conversation_text, llm_client)
+            return await self._generate_llm_summary(conversation_text, llm_client, is_provider)
 
         # 否则使用简单的格式化摘要
         return self._generate_simple_summary(messages, conversation_text)
@@ -410,17 +415,11 @@ class ContextManager:
         self,
         conversation_text: str,
         llm_client: Any,
+        is_provider: bool = False,
     ) -> str:
         """使用 LLM 生成摘要。"""
         try:
-            # 使用传入的 LLM 客户端生成摘要
-            response = llm_client.messages.create(
-                model="claude-sonnet-4-6-20250514",
-                max_tokens=1000,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": f"""请为以下对话生成一个简洁的摘要，保留关键信息、决策和重要上下文：
+            prompt = f"""请为以下对话生成一个简洁的摘要，保留关键信息、决策和重要上下文：
 
 <conversation>
 {conversation_text}
@@ -432,11 +431,24 @@ class ContextManager:
 3. 保留关键的代码或技术细节
 4. 使用简洁的中文描述
 5. 摘要长度控制在 500 字以内"""
-                    }
-                ]
-            )
-            return f"<conversation_summary>\n{response.content[0].text}\n</conversation_summary>"
-        except Exception as e:
+
+            if is_provider:
+                # 使用 LLMProvider 接口
+                summary = await llm_client.create_simple(
+                    messages=[{"role": "user", "content": prompt}],
+                    max_tokens=1000,
+                )
+                return f"<conversation_summary>\n{summary}\n</conversation_summary>"
+            else:
+                # 向后兼容：直接使用 Anthropic 客户端
+                response = llm_client.messages.create(
+                    model="claude-sonnet-4-6-20250514",
+                    max_tokens=1000,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                text = response.content[0].text
+                return f"<conversation_summary>\n{text}\n</conversation_summary>"
+        except Exception:
             # 如果 LLM 调用失败，回退到简单摘要
             return self._generate_simple_summary(None, conversation_text)
 
@@ -490,7 +502,7 @@ class ContextManager:
         uncompressed_result = await db.execute(
             select(Message)
             .where(Message.session_id == session_id)
-            .where(Message.is_summarized == False)
+            .where(~Message.is_summarized)
             .order_by(Message.created_at)
         )
         uncompressed_messages = list(uncompressed_result.scalars().all())
@@ -556,7 +568,7 @@ class ContextManager:
         result = await db.execute(
             select(Message)
             .where(Message.session_id == session_id)
-            .where(Message.is_summarized == False)
+            .where(~Message.is_summarized)
             .where(Message.role != self.SUMMARY_ROLE)
             .order_by(Message.created_at)
         )
@@ -601,7 +613,7 @@ class ContextManager:
         result = await db.execute(
             select(Message)
             .where(Message.session_id == session_id)
-            .where(Message.is_summarized == False)
+            .where(~Message.is_summarized)
             .where(Message.role == "user")
             .order_by(Message.created_at)
         )
@@ -655,7 +667,7 @@ class ContextManager:
         assistant_result = await db.execute(
             select(Message)
             .where(Message.session_id == session_id)
-            .where(Message.is_summarized == False)
+            .where(~Message.is_summarized)
             .where(Message.role == "assistant")
             .order_by(Message.created_at)
         )
@@ -764,6 +776,7 @@ class ContextManager:
         self,
         db: AsyncSession,
         session_id: str,
+        llm_provider: Any = None,
         llm_client: Any = None,
         keep_recent_tools: int | None = None,
         keep_recent_tokens: int | None = None,
@@ -776,7 +789,8 @@ class ContextManager:
         Args:
             db: 数据库会话
             session_id: 会话 ID
-            llm_client: LLM 客户端（用于生成摘要）
+            llm_provider: LLMProvider 实例（优先使用）
+            llm_client: Anthropic 客户端（向后兼容）
             keep_recent_tools: 保留的最近工具结果数量
             keep_recent_tokens: 压缩后保留的 token 预算
 
@@ -798,7 +812,10 @@ class ContextManager:
         # 2. 检查是否仍需压缩
         if await self.should_compress(db, session_id):
             compress_result = await self.compress_context(
-                db, session_id, llm_client, keep_recent_tokens=keep_recent_tokens
+                db, session_id,
+                llm_provider=llm_provider,
+                llm_client=llm_client,
+                keep_recent_tokens=keep_recent_tokens,
             )
             results["compress_result"] = compress_result
 

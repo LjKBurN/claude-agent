@@ -6,7 +6,7 @@
 |------|------|
 | 后端语言 | Python 3.10+ |
 | 后端框架 | FastAPI |
-| Agent | LangChain + LangGraph |
+| Agent | Agent Core (LLM + Tools + Loop) |
 | 数据库 | SQLite → PostgreSQL |
 | 部署 | Docker |
 | 认证 | API Key |
@@ -29,18 +29,33 @@
 │  认证 | 限流 | 日志 | 路由        │
 └──────────────┬──────────────────┘
                ▼
-┌─────────────────────────────────┐
-│          Agent Core              │
-│  ┌───────────────────────────┐  │
-│  │    LangGraph Workflow     │  │
-│  │  Router → Agent → Output  │  │
-│  └───────────────────────────┘  │
-│  Tools │ Skills │ MCP           │
-└──────────────┬──────────────────┘
+┌─────────────────────────────────────────┐
+│              Agent Core                  │
+│  ┌─────────────┐  ┌──────────────────┐  │
+│  │ AgentLoop   │  │  LLMProvider     │  │
+│  │ (核心循环)   │  │  (统一模型调用)   │  │
+│  └──────┬──────┘  └──────────────────┘  │
+│         │                                │
+│  ┌──────┴──────┐  ┌──────────────────┐  │
+│  │ EventBus    │  │ ApprovalManager  │  │
+│  │ (事件总线)   │  │ (HITL 审批)      │  │
+│  └─────────────┘  └──────────────────┘  │
+│  ┌─────────────┐  ┌──────────────────┐  │
+│  │ SessionMgr  │  │ AgentBuilder     │  │
+│  │ (会话管理)   │  │ (配置驱动组装)   │  │
+│  └─────────────┘  └──────────────────┘  │
+│  ┌─────────────┐                         │
+│  │ AgentRunner │                         │
+│  │ (执行封装)   │                         │
+│  └─────────────┘                         │
+│                                          │
+│  UnifiedToolRegistry                     │
+│  (内置工具 │ Skill │ MCP)                 │
+└──────────────┬──────────────────────────┘
                ▼
 ┌──────────────────┬──────────────┐
-│ SQLite (存储)    │ Anthropic    │
-│ - 会话/消息      │ (LLM)        │
+│ SQLite (存储)    │ LLM Provider │
+│ - 会话/消息      │ (Anthropic等)│
 │ - 配置           │              │
 └──────────────────┴──────────────┘
 ```
@@ -49,10 +64,11 @@
 
 | 概念 | 说明 | 示例 |
 |------|------|------|
-| **Tool** | 原子操作 | bash, read_file, http_request |
+| **Tool** | 原子操作，通过 `@register_tool` 注册到 UnifiedToolRegistry | bash, read_file, http_request |
 | **Skill** | Prompt 模板，通过上下文注入扩展能力 | code_review, doc_gen |
 | **MCP** | 外部资源协议，支持延迟加载 | 文件系统, 数据库 |
-| **Context** | 上下文管理，支持自动压缩 | 摘要生成, 滑动窗口 |
+| **Context** | 上下文管理，支持自动压缩（带缓存检查） | 摘要生成, 滑动窗口 |
+| **AgentRunner** | Agent 执行封装，构建并运行 AgentLoop | 同步/流式执行、事件转换 |
 
 ### 上下文管理
 
@@ -86,6 +102,11 @@ class Message:
 **配置参数**：
 - `compression_threshold`: 触发压缩的消息数量阈值（默认 40）
 - `keep_recent_count`: 保留的近期消息数量（默认 10）
+
+**压缩检查缓存**：SessionManager 内置缓存机制，避免每次请求都查询 DB：
+- 60 秒间隔检查 或 累积 5 条新消息后强制检查
+- LRU 淘汰，最多缓存 1000 个 session
+- 手动压缩后自动清除缓存
 
 ### MCP 集成
 
@@ -238,7 +259,24 @@ claude-agent/
 │   ├── config.py             # 配置管理
 │   ├── core/                 # 核心逻辑（Agent 能力中心）
 │   │   ├── __init__.py
-│   │   ├── agent_service.py  # Agent 服务
+│   │   ├── agent/            # Agent Core — 解耦后的核心模块
+│   │   │   ├── __init__.py   # 公共 API 导出
+│   │   │   ├── loop.py       # AgentLoop 核心循环
+│   │   │   ├── runner.py     # AgentRunner 执行封装
+│   │   │   ├── events.py     # EventBus + AgentEvent（支持有界队列）
+│   │   │   ├── approval.py   # HITL 审批管理
+│   │   │   ├── session.py    # SessionManager 会话管理
+│   │   │   ├── builder.py    # AgentBuilder 配置驱动组装
+│   │   │   └── llm/          # LLM Provider 抽象
+│   │   │       ├── base.py   # LLMProvider ABC + 数据类型
+│   │   │       └── anthropic_provider.py
+│   │   ├── agent_service.py  # Agent 服务（薄外观，委托给 AgentRunner）
+│   │   ├── tools/            # 工具系统
+│   │   │   ├── base.py       # @register_tool 装饰器（统一注册到 UnifiedToolRegistry）
+│   │   │   ├── registry.py   # UnifiedToolRegistry 统一注册表
+│   │   │   ├── bash.py       # Shell 命令工具
+│   │   │   ├── file.py       # 文件操作工具
+│   │   │   └── http.py       # HTTP 请求工具
 │   │   ├── tool_executor.py  # 统一工具执行器
 │   │   ├── tools/            # 工具模块（可扩展）
 │   │   │   ├── __init__.py   # 工具注册入口
@@ -312,8 +350,10 @@ claude-agent/
 | `/api/chat` | POST | 对话（非流式） |
 | `/api/chat/stream` | POST | 对话（流式 SSE） |
 | `/api/sessions` | GET/POST | 会话管理 |
-| `/api/tools` | GET | 工具列表 |
+| `/api/tools` | GET | 可用工具列表（用于 Agent 配置） |
 | `/api/skills` | GET | 技能列表 |
+| `/api/agent-configs` | GET/POST | Agent 配置 CRUD |
+| `/api/agent-configs/{id}` | GET/PUT/DELETE | Agent 配置详情/更新/删除 |
 | `/api/channels` | POST/GET | Channel 管理 |
 | `/api/channels/{id}/start` | POST | 启动 Channel |
 | `/api/channels/{id}/stop` | POST | 停止 Channel |
@@ -326,9 +366,8 @@ claude-agent/
 POST /api/chat
 {
   "message": "分析项目代码",
-  "session_id": "xxx",    // 可选
-  "skill": "code_review", // 可选
-  "stream": false         // 可选
+  "session_id": "xxx",         // 可选
+  "agent_config_id": "yyy"     // 可选，创建新会话时绑定 Agent 配置
 }
 ```
 

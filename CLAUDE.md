@@ -21,14 +21,37 @@ claude-agent/
 │   ├── __main__.py          # Module entry point
 │   ├── main.py              # FastAPI application entry
 │   ├── config.py            # Configuration management
-│   ├── agent.py             # Native Agent implementation
-│   ├── langchain_agent.py   # LangChain Agent implementation
-│   ├── tools.py             # Tool definitions
+│   ├── core/                # Core logic
+│   │   ├── agent/           # Agent Core (decoupled)
+│   │   │   ├── loop.py      # AgentLoop — core tool-calling loop
+│   │   │   ├── events.py    # EventBus + AgentEvent
+│   │   │   ├── approval.py  # HITL approval manager
+│   │   │   ├── session.py   # SessionManager facade
+│   │   │   ├── builder.py   # AgentBuilder (config-driven assembly)
+│   │   │   └── llm/         # LLM provider abstraction
+│   │   │       ├── base.py  # LLMProvider ABC
+│   │   │       └── anthropic_provider.py
+│   │   ├── agent_service.py # Agent service (thin facade)
+│   │   ├── tools/           # Tool system
+│   │   │   ├── base.py      # @register_tool decorator
+│   │   │   └── registry.py  # UnifiedToolRegistry
+│   │   ├── tool_executor.py # Unified tool executor
+│   │   ├── skills/          # Skill system
+│   │   ├── mcp/             # MCP integration
+│   │   ├── context/         # Context management
+│   │   ├── prompt/          # System prompt builder
+│   │   └── channel/         # IM channel adapters
 │   ├── api/                 # API routes
+│   │   ├── agent_configs.py # Agent Config CRUD
+│   │   ├── tools.py         # Tools listing
 │   │   └── __init__.py
 │   ├── db/                  # Database layer
 │   │   ├── __init__.py
-│   │   └── database.py
+│   │   ├── database.py
+│   │   └── models/
+│   │       ├── agent_config.py  # AgentConfig ORM model
+│   │       ├── session.py       # Session + Message (with agent_config_id FK)
+│   │       └── channel.py
 │   └── middleware/          # Middleware (auth, etc.)
 │       ├── __init__.py
 │       └── auth.py

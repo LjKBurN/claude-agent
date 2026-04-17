@@ -1,5 +1,13 @@
 """API Pydantic 模型。"""
 
+from backend.api.schemas.agent_config import (
+    AgentConfigInfo,
+    AgentConfigList,
+    CreateAgentConfigRequest,
+    ToolInfo,
+    ToolsListResponse,
+    UpdateAgentConfigRequest,
+)
 from backend.api.schemas.chat import (
     ChatRequest,
     ChatResponse,
@@ -20,4 +28,10 @@ __all__ = [
     "SessionList",
     "MessageInfo",
     "MessageList",
+    "AgentConfigInfo",
+    "AgentConfigList",
+    "CreateAgentConfigRequest",
+    "UpdateAgentConfigRequest",
+    "ToolInfo",
+    "ToolsListResponse",
 ]

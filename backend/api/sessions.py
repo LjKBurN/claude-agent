@@ -1,12 +1,13 @@
 """会话管理 API 路由。"""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.api.schemas import SessionInfo, SessionList, MessageInfo, MessageList
 from backend.db.database import get_db
 from backend.db.models import Session, Message
+from backend.db.models.agent_config import AgentConfigModel
 from backend.middleware.auth import verify_api_key
 
 router = APIRouter()
@@ -16,24 +17,30 @@ router = APIRouter()
 async def list_sessions(
     limit: int = 20,
     offset: int = 0,
+    agent_config_id: str | None = Query(None, description="按 Agent 配置过滤"),
     db: AsyncSession = Depends(get_db),
     _: str = Depends(verify_api_key),
 ) -> SessionList:
     """获取会话列表。"""
+    # 构建查询
+    base_query = select(Session)
+    count_query = select(func.count(Session.id))
+
+    if agent_config_id is not None:
+        base_query = base_query.where(Session.agent_config_id == agent_config_id)
+        count_query = count_query.where(Session.agent_config_id == agent_config_id)
+
     # 查询总数
-    count_result = await db.execute(select(func.count(Session.id)))
+    count_result = await db.execute(count_query)
     total = count_result.scalar() or 0
 
     # 查询会话
     result = await db.execute(
-        select(Session)
-        .order_by(Session.updated_at.desc())
-        .limit(limit)
-        .offset(offset)
+        base_query.order_by(Session.updated_at.desc()).limit(limit).offset(offset)
     )
     sessions = result.scalars().all()
 
-    # 查询每个会话的消息数
+    # 查询每个会话的消息数和关联的 Agent 信息
     session_list = []
     for session in sessions:
         msg_count_result = await db.execute(
@@ -41,11 +48,23 @@ async def list_sessions(
         )
         msg_count = msg_count_result.scalar() or 0
 
+        # 查询关联的 Agent 名称
+        agent_name = None
+        if session.agent_config_id:
+            agent_result = await db.execute(
+                select(AgentConfigModel.name).where(
+                    AgentConfigModel.id == session.agent_config_id
+                )
+            )
+            agent_name = agent_result.scalar_one_or_none()
+
         session_list.append(SessionInfo(
             id=session.id,
             created_at=session.created_at,
             updated_at=session.updated_at,
             message_count=msg_count,
+            agent_config_id=session.agent_config_id,
+            agent_name=agent_name,
         ))
 
     return SessionList(sessions=session_list, total=total)

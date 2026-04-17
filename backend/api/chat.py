@@ -27,6 +27,7 @@ async def chat(
         user_message=request.message,
         session_id=request.session_id,
         db=db,
+        agent_config_id=request.agent_config_id,
     )
 
 
@@ -53,6 +54,7 @@ async def chat_stream(
             user_message=request.message,
             session_id=request.session_id,
             db=db,
+            agent_config_id=request.agent_config_id,
         ),
         media_type="text/event-stream",
         headers={
