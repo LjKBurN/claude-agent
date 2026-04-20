@@ -62,7 +62,7 @@ class SkillsSummaryProvider:
 
 
 class ToolGuidelinesProvider:
-    """工具使用策略 — 包括浏览器工具、MCP lazy loading 等。"""
+    """工具使用策略。"""
 
     section_tag = "tool_guidelines"
 
@@ -85,13 +85,6 @@ class ToolGuidelinesProvider:
                 "Use these to navigate web pages, take screenshots, click elements, "
                 "and fill forms. Always navigate to a URL first, then interact with "
                 "the page."
-            )
-
-        if context.mcp_lazy_mode:
-            lines.append("")
-            lines.append(
-                "Many MCP tools are available but not loaded yet. "
-                "Use the mcp_search tool to discover and load additional tools."
             )
 
         return "\n".join(lines)

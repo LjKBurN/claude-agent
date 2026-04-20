@@ -4,6 +4,8 @@ from backend.api.schemas.agent_config import (
     AgentConfigInfo,
     AgentConfigList,
     CreateAgentConfigRequest,
+    McpServerItem,
+    SkillItem,
     ToolInfo,
     ToolsListResponse,
     UpdateAgentConfigRequest,
@@ -34,4 +36,6 @@ __all__ = [
     "UpdateAgentConfigRequest",
     "ToolInfo",
     "ToolsListResponse",
+    "SkillItem",
+    "McpServerItem",
 ]

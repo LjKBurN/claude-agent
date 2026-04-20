@@ -128,8 +128,7 @@ export interface AgentConfigInfo {
   model_id: string;
   max_tokens: number;
   builtin_tools: string[];
-  include_skills: boolean;
-  include_mcp: boolean;
+  skills: string[];
   mcp_servers: string[];
   max_iterations: number;
   tool_timeout: number;
@@ -151,8 +150,7 @@ export interface CreateAgentConfigRequest {
   model_id?: string;
   max_tokens?: number;
   builtin_tools?: string[];
-  include_skills?: boolean;
-  include_mcp?: boolean;
+  skills?: string[];
   mcp_servers?: string[];
   max_iterations?: number;
   tool_timeout?: number;
@@ -172,8 +170,67 @@ export interface ToolInfo {
   permission: string;
 }
 
+export interface SkillItem {
+  name: string;
+  description: string;
+  source: string;
+}
+
+export interface McpServerItem {
+  name: string;
+  tools_count: number;
+  connected: boolean;
+}
+
 export interface ToolsListResponse {
   tools: ToolInfo[];
   builtin: ToolInfo[];
   mcp: ToolInfo[];
+  skills: SkillItem[];
+  mcp_servers: McpServerItem[];
+}
+
+/** MCP Server Management API types */
+
+export interface MCPServerInfo {
+  id: string;
+  name: string;
+  transport: "stdio" | "http";
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  url: string;
+  headers: Record<string, string>;
+  enabled: boolean;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MCPServerList {
+  servers: MCPServerInfo[];
+  total: number;
+}
+
+export interface CreateMCPServerRequest {
+  name: string;
+  transport?: "stdio" | "http";
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  headers?: Record<string, string>;
+  enabled?: boolean;
+  description?: string;
+}
+
+export type UpdateMCPServerRequest = Partial<CreateMCPServerRequest>;
+
+export interface MCPServerStatusInfo {
+  name: string;
+  connected: boolean;
+  error: string | null;
+  tools: { name: string; description: string; input_schema: Record<string, unknown> }[];
+  resources: { uri: string; name: string; description: string; mime_type: string }[];
+  prompts: { name: string; description: string; arguments: Record<string, unknown>[] }[];
 }

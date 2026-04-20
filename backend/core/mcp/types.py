@@ -138,25 +138,6 @@ class MCPTool:
             "input_schema": self.input_schema,
         }
 
-    def to_index_entry(self) -> "MCPToolIndexEntry":
-        """转换为轻量级索引条目。"""
-        # 截取描述的前100字符作为简短描述
-        short_desc = self.description[:100] if len(self.description) > 100 else self.description
-        return MCPToolIndexEntry(
-            name=self.name,
-            short_description=short_desc,
-            server_name=self.server_name,
-        )
-
-
-@dataclass
-class MCPToolIndexEntry:
-    """MCP 工具索引条目（轻量级，用于延迟加载）。"""
-
-    name: str  # 工具名称
-    short_description: str  # 简短描述（截断）
-    server_name: str = ""  # 来源 Server
-
 
 @dataclass
 class MCPResource:

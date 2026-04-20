@@ -33,9 +33,8 @@ class AgentConfig:
 
     # 工具选择
     builtin_tools: list[str] = field(default_factory=list)  # 空 = 全部
-    include_skills: bool = True
-    include_mcp: bool = True
-    mcp_servers: list[str] = field(default_factory=list)  # 空 = 全部
+    skills: list[str] = field(default_factory=list)          # 空 = 全部 skills
+    mcp_servers: list[str] = field(default_factory=list)     # 空 = 全部 MCP servers
 
     # 行为
     max_iterations: int = 20
@@ -55,8 +54,7 @@ class AgentConfig:
             model_id=data.get("model_id", "claude-sonnet-4-6-20250514"),
             max_tokens=data.get("max_tokens", 8000),
             builtin_tools=data.get("builtin_tools", []),
-            include_skills=data.get("include_skills", True),
-            include_mcp=data.get("include_mcp", True),
+            skills=data.get("skills", []),
             mcp_servers=data.get("mcp_servers", []),
             max_iterations=data.get("max_iterations", 20),
             tool_timeout=data.get("tool_timeout", 120),
@@ -72,8 +70,7 @@ class AgentConfig:
             "model_id": self.model_id,
             "max_tokens": self.max_tokens,
             "builtin_tools": self.builtin_tools,
-            "include_skills": self.include_skills,
-            "include_mcp": self.include_mcp,
+            "skills": self.skills,
             "mcp_servers": self.mcp_servers,
             "max_iterations": self.max_iterations,
             "tool_timeout": self.tool_timeout,
@@ -135,13 +132,14 @@ class AgentBuilder:
 
     def _build_registry(self) -> UnifiedToolRegistry:
         """根据配置选择性地构建工具注册表。"""
-        # 使用 builtin_only 参数过滤内置工具
         builtin_only = self.config.builtin_tools if self.config.builtin_tools else None
+        skills = self.config.skills if self.config.skills else None
+        mcp_servers = self.config.mcp_servers if self.config.mcp_servers else None
 
         registry = populate_registry(
             builtin_only=builtin_only,
-            include_skills=self.config.include_skills,
-            include_mcp=self.config.include_mcp,
+            skills=skills,
+            mcp_servers=mcp_servers,
         )
 
         return registry

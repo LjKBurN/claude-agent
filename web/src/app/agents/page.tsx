@@ -74,16 +74,16 @@ export default function AgentsPage() {
                             ? `${agent.builtin_tools.length} 工具`
                             : "全部工具"}
                         </Badge>
-                        {agent.include_skills && (
-                          <Badge variant="outline" className="text-[10px]">
-                            Skills
-                          </Badge>
-                        )}
-                        {agent.include_mcp && (
-                          <Badge variant="outline" className="text-[10px]">
-                            MCP
-                          </Badge>
-                        )}
+                        <Badge variant="outline" className="text-[10px]">
+                          {agent.skills.length > 0
+                            ? `${agent.skills.length} Skills`
+                            : "全部 Skills"}
+                        </Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {agent.mcp_servers.length > 0
+                            ? `${agent.mcp_servers.length} MCP`
+                            : "全部 MCP"}
+                        </Badge>
                       </div>
                     </div>
                   </div>

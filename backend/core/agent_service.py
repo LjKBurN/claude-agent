@@ -91,9 +91,18 @@ class AgentService:
         if self._mcp_initialized:
             return
 
-        from pathlib import Path
-        project_root = Path(self.settings.mcp_config_path).parent
-        mcp_manager.load_all_configs(project_root)
+        # 从数据库加载 MCP 配置
+        try:
+            from backend.db.database import async_session
+            async with async_session() as session:
+                await mcp_manager.load_configs_from_db(session)
+        except Exception as e:
+            logger.warning(f"Failed to load MCP configs from DB: {e}")
+            # 降级：从 .mcp.json 文件加载
+            from pathlib import Path
+            project_root = Path(self.settings.mcp_config_path).parent
+            mcp_manager.load_all_configs(project_root)
+
         await mcp_manager.initialize()
 
         self._mcp_initialized = True
@@ -105,18 +114,29 @@ class AgentService:
         """获取所有 MCP 工具名称集合。"""
         return {t.name for t in self._get_registry().by_source("mcp")}
 
-    def _build_system_prompt(self, channel: str = "web") -> str:
-        """构建 system prompt。"""
+    def _build_system_prompt(
+        self, channel: str = "web", allowed_skills: list[str] | None = None
+    ) -> str:
+        """构建 system prompt。
+
+        Args:
+            channel: 消息渠道
+            allowed_skills: 允许的 skill 名称列表。None/空 = 全部 skills。
+        """
         builder = get_system_prompt_builder()
-        skills = skill_registry.list_for_tool()
+        all_skills = skill_registry.list_for_tool()
+
+        if allowed_skills:
+            skills = [s for s in all_skills if s.name in allowed_skills]
+        else:
+            skills = all_skills
+
         mcp_tool_names = self._get_mcp_tool_names()
-        _, lazy_mode = mcp_manager.get_tools_for_api()
 
         context = PromptContext(
             channel=channel,
             skills=skills,
             mcp_tool_names=mcp_tool_names,
-            mcp_lazy_mode=lazy_mode,
         )
         return builder.build(context)
 
@@ -145,7 +165,7 @@ class AgentService:
         # HITL 恢复 或 正常流程
         pending_blocks = await sm.check_pending_approval(db, session.id)
         if pending_blocks:
-            runner = await self._resolve_runner(db, session.agent_config_id)
+            runner, agent_config = await self._resolve_runner(db, session.agent_config_id)
             messages = await sm.build_resume_messages(
                 db, session, user_message, pending_blocks,
                 tool_executor_fn=runner.make_tool_executor(),
@@ -153,10 +173,11 @@ class AgentService:
         else:
             await sm.save_message(db, session.id, "user", user_message)
             messages = await sm.get_messages(db, session.id)
-            runner = await self._resolve_runner(db, session.agent_config_id)
+            runner, agent_config = await self._resolve_runner(db, session.agent_config_id)
 
+        allowed_skills = agent_config.skills if agent_config and agent_config.skills else None
         text, tool_call_records, approval_info, content_blocks, orig_count, agent_msgs = (
-            await runner.run(messages, self._build_system_prompt(channel))
+            await runner.run(messages, self._build_system_prompt(channel, allowed_skills))
         )
         # ToolCallRecord → API 层 ToolCall
         api_tool_calls = [
@@ -194,7 +215,7 @@ class AgentService:
 
         pending_blocks = await sm.check_pending_approval(db, session.id)
         if pending_blocks:
-            runner = await self._resolve_runner(db, session.agent_config_id)
+            runner, agent_config = await self._resolve_runner(db, session.agent_config_id)
             messages = await sm.build_resume_messages(
                 db, session, user_message, pending_blocks,
                 tool_executor_fn=runner.make_tool_executor(),
@@ -202,10 +223,12 @@ class AgentService:
         else:
             await sm.save_message(db, session.id, "user", user_message)
             messages = await sm.get_messages(db, session.id)
-            runner = await self._resolve_runner(db, session.agent_config_id)
+            runner, agent_config = await self._resolve_runner(db, session.agent_config_id)
 
+        allowed_skills = agent_config.skills if agent_config and agent_config.skills else None
         async for event in self._stream_agent_response(
             db, session, messages, channel=channel, runner=runner,
+            allowed_skills=allowed_skills,
         ):
             yield event
 
@@ -247,11 +270,14 @@ class AgentService:
 
     async def _resolve_runner(
         self, db: AsyncSession, agent_config_id: str | None,
-    ) -> AgentRunner:
+    ) -> tuple[AgentRunner, AgentConfig | None]:
         """根据 agent_config_id 解析 AgentRunner。
 
         - 有 config_id → 从 DB 加载 → AgentBuilder 构建
         - 无 config_id → 使用默认 runner
+
+        Returns:
+            (AgentRunner, AgentConfig | None) — config 为 None 表示使用默认配置
         """
         if agent_config_id:
             from sqlalchemy import select as sa_select
@@ -269,8 +295,7 @@ class AgentService:
                     model_id=model.model_id,
                     max_tokens=model.max_tokens,
                     builtin_tools=model.builtin_tools or [],
-                    include_skills=model.include_skills,
-                    include_mcp=model.include_mcp,
+                    skills=model.skills or [],
                     mcp_servers=model.mcp_servers or [],
                     max_iterations=model.max_iterations,
                     tool_timeout=model.tool_timeout,
@@ -281,16 +306,17 @@ class AgentService:
                     api_key=self.settings.anthropic_api_key,
                     base_url=self.settings.anthropic_base_url,
                 )
-                return AgentRunner(
+                runner = AgentRunner(
                     llm=agent_loop.llm,
                     registry=agent_loop.registry,
                     max_iterations=config.max_iterations,
                     tool_timeout=config.tool_timeout,
                     request_timeout=config.request_timeout,
                 )
+                return runner, config
             logger.warning(f"AgentConfig {agent_config_id} not found, falling back to default")
 
-        return self._get_runner()
+        return self._get_runner(), None
 
     async def _handle_agent_result(
         self, db, session, response_text, tool_calls, approval_info,
@@ -329,6 +355,7 @@ class AgentService:
     async def _stream_agent_response(
         self, db, session, messages, *, channel: str = "web",
         runner: AgentRunner | None = None,
+        allowed_skills: list[str] | None = None,
     ) -> AsyncGenerator[str, None]:
         """运行 agent 流式响应并 yield SSE 事件。"""
         from backend.api.schemas.chat import ToolCall
@@ -341,7 +368,7 @@ class AgentService:
 
         agent_runner = runner or self._get_runner()
         async for event in agent_runner.run_stream(
-            messages, self._build_system_prompt(channel)
+            messages, self._build_system_prompt(channel, allowed_skills)
         ):
             if event["type"] == "text":
                 full_response += event["content"]

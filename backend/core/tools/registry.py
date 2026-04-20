@@ -120,15 +120,15 @@ class UnifiedToolRegistry:
 
 def populate_registry(
     builtin_only: list[str] | None = None,
-    include_skills: bool = True,
-    include_mcp: bool = True,
+    skills: list[str] | None = None,
+    mcp_servers: list[str] | None = None,
 ) -> UnifiedToolRegistry:
     """从所有工具源填充统一注册表。
 
     Args:
         builtin_only: 如果指定，只注册这些内置工具（按名称过滤）
-        include_skills: 是否包含 Skill meta-tool
-        include_mcp: 是否包含 MCP 工具
+        skills: 如果指定，只启用这些 skills（空/None = 全部 skills）
+        mcp_servers: 如果指定，只启用这些 MCP servers（空/None = 全部 MCP）
 
     Returns:
         填充好的 UnifiedToolRegistry
@@ -144,7 +144,9 @@ def populate_registry(
         registry.register(desc)
 
     # 2. Skill meta-tool
-    if include_skills:
+    # skills=None 或 skills=[] 表示全部；非空列表表示只启用指定的 skills
+    # 无论哪种情况，都注册 Skill meta-tool（过滤在 system prompt 层面执行）
+    if skills is None or len(skills) > 0:
         try:
             from backend.core.skills.registry import skill_registry
             skill_def = skill_registry.get_skill_tool_definition()
@@ -159,10 +161,10 @@ def populate_registry(
             pass  # Skills 可能未配置
 
     # 3. MCP 工具
-    if include_mcp:
+    if mcp_servers is None or len(mcp_servers) > 0:
         try:
             from backend.core.mcp.manager import mcp_manager
-            mcp_tools, _ = mcp_manager.get_tools_for_api()
+            mcp_tools = mcp_manager.get_tools_for_api(mcp_servers)
             for mt in mcp_tools:
                 registry.register(ToolDescriptor(
                     name=mt["name"],

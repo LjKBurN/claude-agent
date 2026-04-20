@@ -259,12 +259,9 @@ class AgentLoop:
                         block.name, block.input, block.id, messages, tools,
                     )
 
-                    # 发出额外事件（Skill 加载、MCP 工具注册等）
+                    # 发出额外事件（Skill 加载等）
                     for evt in extra_events:
                         await self.events.emit(evt)
-                        if evt.type == EventType.MCP_TOOLS_LOADED:
-                            for tool_name in evt.data.get("tools", []):
-                                pass  # tools 已在 _execute_single_tool 中扩展
 
                     await self.events.emit(AgentEvent(
                         type=EventType.TOOL_END,
@@ -341,17 +338,6 @@ class AgentLoop:
                 extra_events.append(AgentEvent(
                     type=EventType.SKILL_LOAD,
                     data={"name": skill_name, "message": f'The "{skill_name}" skill is loading'},
-                ))
-
-            # MCP Search 动态工具注册
-            if result.tools_to_register and tools is not None:
-                tools.extend(result.tools_to_register)
-                extra_events.append(AgentEvent(
-                    type=EventType.MCP_TOOLS_LOADED,
-                    data={
-                        "count": len(result.tools_to_register),
-                        "tools": [t["name"] for t in result.tools_to_register],
-                    },
                 ))
 
             return result.output, extra_events

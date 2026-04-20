@@ -140,9 +140,7 @@ ChannelService（消息路由层）← 白名单、会话映射、调用 Agent
 
 **新增平台**：只需创建 Protocol + Auth + API 路由 3 个文件，注册一行，不改旧代码。
 
-### MCP 集成
-
-MCP (Model Context Protocol) 是连接外部资源的标准协议。
+### Skill 系统
 
 **支持两种传输方式**：
 
@@ -151,34 +149,22 @@ MCP (Model Context Protocol) 是连接外部资源的标准协议。
 | **STDIO** | 子进程通信 | 本地 MCP Server |
 | **HTTP/SSE** | HTTP + Server-Sent Events | 远程 MCP Server |
 
-**配置格式**（`.mcp.json`，与 Claude Code 兼容）：
+**配置存储**：
 
-STDIO 方式：
-```json
-{
-  "mcpServers": {
-    "filesystem": {
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-filesystem", "/path"],
-      "env": {"KEY": "${ENV_VAR}"}
-    }
-  }
-}
-```
+MCP Server 配置存储在数据库 `mcp_servers` 表中，通过 Web 管理界面（`/mcp`）进行 CRUD 操作。
 
-HTTP 方式：
-```json
-{
-  "mcpServers": {
-    "remote-server": {
-      "url": "http://localhost:8080",
-      "headers": {
-        "Authorization": "Bearer ${API_TOKEN}"
-      }
-    }
-  }
-}
-```
+首次启动时，`.mcp.json` 中的配置会自动迁移到数据库。环境变量支持 `${VAR}` 语法，在连接时解析。
+
+**MCPManager API**：
+- `load_configs_from_db(session)` — 从数据库加载配置
+- `connect_server(name)` / `disconnect_server(name)` — 单个 Server 连接控制
+- `get_server_details(name)` — 获取工具/资源/提示词
+- `initialize()` / `shutdown()` — 批量连接管理
+
+**配置示例**：
+
+STDIO 方式：command + args + env（支持 `${VAR}` 环境变量替换）
+HTTP 方式：url + headers（支持 `${VAR}` 环境变量替换）
 
 **延迟加载（MCP Tool Search）**：
 当 MCP 工具数量超过阈值（默认 10 个）时，自动启用延迟加载模式：

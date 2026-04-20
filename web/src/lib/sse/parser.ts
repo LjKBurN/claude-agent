@@ -6,7 +6,6 @@ export type SSEEvent =
   | { type: "tool_start"; name: string }
   | { type: "tool_end"; name: string; output: string }
   | { type: "skill_load"; name: string; message: string }
-  | { type: "mcp_tools_loaded"; count: number; tools: string[] }
   | { type: "approval_needed"; message: string; tools: { name: string; input: Record<string, unknown> }[] }
   | { type: "done"; tool_calls?: ToolCall[]; status?: string };
 
@@ -84,12 +83,6 @@ function parseSSEEvent(raw: string): SSEEvent | null {
           type: "skill_load",
           name: parsed.name,
           message: parsed.message,
-        };
-      case "mcp_tools_loaded":
-        return {
-          type: "mcp_tools_loaded",
-          count: parsed.count,
-          tools: parsed.tools,
         };
       case "approval_needed":
         return {

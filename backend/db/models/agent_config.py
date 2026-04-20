@@ -25,8 +25,7 @@ class AgentConfigModel(Base):
 
     # 工具配置 (JSON)
     builtin_tools: Mapped[list] = mapped_column(JSON, default=list)
-    include_skills: Mapped[bool] = mapped_column(Boolean, default=True)
-    include_mcp: Mapped[bool] = mapped_column(Boolean, default=True)
+    skills: Mapped[list] = mapped_column(JSON, default=list)
     mcp_servers: Mapped[list] = mapped_column(JSON, default=list)
 
     # 行为

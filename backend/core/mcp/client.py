@@ -149,12 +149,17 @@ class MCPClient:
         # 提取内容
         content = result.get("content", [])
         if isinstance(content, list):
-            # 合并所有文本内容
-            texts = []
+            parts = []
             for item in content:
                 if item.get("type") == "text":
-                    texts.append(item.get("text", ""))
-            return "\n".join(texts) if texts else str(result)
+                    parts.append(item.get("text", ""))
+                elif item.get("type") == "image":
+                    # 将图片转为 data URL，前端可渲染为 <img>
+                    mime = item.get("mimeType", "image/png")
+                    data = item.get("data", "")
+                    if data:
+                        parts.append(f"data:{mime};base64,{data}")
+            return "\n".join(parts) if parts else str(result)
 
         return result
 

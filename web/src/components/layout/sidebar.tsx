@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Sparkles, ChevronRight, ChevronDown, Radio } from "lucide-react";
+import { Plus, Sparkles, ChevronRight, ChevronDown, Radio, Plug } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -78,6 +78,19 @@ export function Sidebar() {
           >
             <Radio className="h-4 w-4" />
             Channel 管理
+          </Button>
+        </Link>
+      </div>
+
+      {/* MCP management */}
+      <div className="p-2">
+        <Link href="/mcp">
+          <Button
+            variant="ghost"
+            className="w-full justify-start gap-2 text-muted-foreground"
+          >
+            <Plug className="h-4 w-4" />
+            MCP 管理
           </Button>
         </Link>
       </div>

@@ -3,41 +3,6 @@
     "playwright": {
       "command": "npx",
       "args": ["-y", "@playwright/mcp@latest"]
-    },
-    "filesystem": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@anthropic-ai/mcp-server-filesystem",
-        "/path/to/allowed/directory"
-      ],
-      "disabled": true
-    },
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-github"],
-      "env": {
-        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
-      },
-      "disabled": true
-    },
-    "postgres": {
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-postgres"],
-      "env": {
-        "DATABASE_URL": "${DATABASE_URL}"
-      },
-      "disabled": true
-    },
-    "time": {
-      "command": "uvx",
-      "args": ["mcp-server-time", "--local-timezone", "Asia/Shanghai"],
-      "disabled": true
-    },
-    "fetch": {
-      "command": "uvx",
-      "args": ["mcp-server-fetch"],
-      "disabled": true
     }
   }
 }

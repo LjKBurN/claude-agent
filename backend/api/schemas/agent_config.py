@@ -1,7 +1,6 @@
 """Agent Config API 请求/响应模型。"""
 
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -20,8 +19,9 @@ class CreateAgentConfigRequest(BaseModel):
     builtin_tools: list[str] = Field(
         default_factory=list, description="启用的内置工具列表，空=全部"
     )
-    include_skills: bool = Field(True, description="是否启用 Skills")
-    include_mcp: bool = Field(True, description="是否启用 MCP")
+    skills: list[str] = Field(
+        default_factory=list, description="启用的 Skills 列表，空=全部"
+    )
     mcp_servers: list[str] = Field(
         default_factory=list, description="启用的 MCP Server，空=全部"
     )
@@ -48,8 +48,7 @@ class UpdateAgentConfigRequest(BaseModel):
     model_id: str | None = None
     max_tokens: int | None = Field(None, ge=100, le=64000)
     builtin_tools: list[str] | None = None
-    include_skills: bool | None = None
-    include_mcp: bool | None = None
+    skills: list[str] | None = None
     mcp_servers: list[str] | None = None
     max_iterations: int | None = Field(None, ge=1, le=100)
     tool_timeout: int | None = Field(None, ge=10, le=600)
@@ -67,8 +66,7 @@ class AgentConfigInfo(BaseModel):
     model_id: str
     max_tokens: int
     builtin_tools: list[str]
-    include_skills: bool
-    include_mcp: bool
+    skills: list[str]
     mcp_servers: list[str]
     max_iterations: int
     tool_timeout: int
@@ -95,9 +93,27 @@ class ToolInfo(BaseModel):
     permission: str  # "safe" | "dangerous"
 
 
+class SkillItem(BaseModel):
+    """Skill 信息（用于 Agent 表单选择）。"""
+
+    name: str
+    description: str
+    source: str
+
+
+class McpServerItem(BaseModel):
+    """MCP Server 信息（用于 Agent 表单选择）。"""
+
+    name: str
+    tools_count: int
+    connected: bool
+
+
 class ToolsListResponse(BaseModel):
     """工具列表响应。"""
 
     tools: list[ToolInfo]
     builtin: list[ToolInfo]
     mcp: list[ToolInfo]
+    skills: list[SkillItem]
+    mcp_servers: list[McpServerItem]

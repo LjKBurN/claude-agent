@@ -2,6 +2,7 @@
 
 from backend.db.models.agent_config import AgentConfigModel
 from backend.db.models.channel import Channel, ChannelSession
+from backend.db.models.mcp_server import MCPServerModel
 from backend.db.models.session import Message, Session
 
-__all__ = ["Session", "Message", "Channel", "ChannelSession", "AgentConfigModel"]
+__all__ = ["Session", "Message", "Channel", "ChannelSession", "AgentConfigModel", "MCPServerModel"]

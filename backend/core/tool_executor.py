@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from backend.api.schemas.chat import ToolCall
 from backend.core.skills.registry import skill_registry
 from backend.core.tools import handle_tool_call
-from backend.core.mcp.manager import mcp_manager
 
 
 @dataclass
@@ -20,11 +19,10 @@ class ToolResult:
     output: str
     tool_use_id: str = ""
     messages_to_inject: list[dict] | None = None  # Skill 调用时需要注入的消息
-    tools_to_register: list[dict] | None = None  # MCP 搜索后需要注册的工具
 
 
 class ToolExecutor:
-    """统一处理工具执行，包括 Skill 和 MCP Search。"""
+    """统一处理工具执行，包括 Skill meta-tool。"""
 
     def execute(
         self,
@@ -44,8 +42,6 @@ class ToolExecutor:
         """
         if tool_name == "Skill":
             return self._execute_skill(tool_input, tool_id)
-        elif tool_name == "mcp_search":
-            return self._execute_mcp_search(tool_input, tool_id)
         else:
             return self._execute_regular_tool(tool_name, tool_input, tool_id)
 
@@ -61,45 +57,6 @@ class ToolExecutor:
             name=tool_name,
             output=result,
             tool_use_id=tool_id,
-        )
-
-    def _execute_mcp_search(self, tool_input: dict, tool_id: str) -> ToolResult:
-        """执行 MCP 搜索（延迟加载模式）。
-
-        返回匹配的工具列表，并准备需要注册的工具定义。
-        """
-        query = tool_input.get("query", "")
-        results = mcp_manager.search_tools(query)
-
-        if not results:
-            return ToolResult(
-                name="mcp_search",
-                output=json.dumps({
-                    "success": False,
-                    "message": f"No MCP tools found matching: {query}",
-                }),
-                tool_use_id=tool_id,
-            )
-
-        # 获取匹配工具的完整定义，用于后续注册
-        tool_names = [r["name"] for r in results]
-        tools_to_register = [
-            t.to_anthropic_format()
-            for t in mcp_manager.get_tools_by_names(tool_names)
-        ]
-
-        return ToolResult(
-            name="mcp_search",
-            output=json.dumps({
-                "success": True,
-                "tools": results,
-                "message": (
-                    f"Found {len(results)} MCP tool(s). "
-                    "Use these tools to complete your task."
-                ),
-            }, ensure_ascii=False),
-            tool_use_id=tool_id,
-            tools_to_register=tools_to_register,
         )
 
     def _execute_skill(self, tool_input: dict, tool_id: str) -> ToolResult:
@@ -153,14 +110,7 @@ class ToolExecutor:
         )
 
     def build_tool_result_message(self, results: list[ToolResult]) -> dict:
-        """构建 tool_result 消息。
-
-        Args:
-            results: 工具执行结果列表
-
-        Returns:
-            符合 Anthropic API 格式的 user 消息
-        """
+        """构建 tool_result 消息。"""
         tool_results = []
         for result in results:
             tool_results.append({

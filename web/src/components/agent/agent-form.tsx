@@ -5,7 +5,13 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listTools } from "@/lib/api/tools";
-import type { AgentConfigInfo, CreateAgentConfigRequest, ToolInfo } from "@/lib/api/types";
+import type {
+  AgentConfigInfo,
+  CreateAgentConfigRequest,
+  McpServerItem,
+  SkillItem,
+  ToolInfo,
+} from "@/lib/api/types";
 
 const MODEL_OPTIONS = [
   { value: "claude-sonnet-4-6-20250514", label: "Claude Sonnet 4.6" },
@@ -27,8 +33,10 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
   const [modelId, setModelId] = useState(initialData?.model_id ?? "claude-sonnet-4-6-20250514");
   const [maxTokens, setMaxTokens] = useState(initialData?.max_tokens ?? 8000);
   const [builtinTools, setBuiltinTools] = useState<string[]>(initialData?.builtin_tools ?? []);
-  const [includeSkills, setIncludeSkills] = useState(initialData?.include_skills ?? true);
-  const [includeMcp, setIncludeMcp] = useState(initialData?.include_mcp ?? true);
+  const [selectedSkills, setSelectedSkills] = useState<string[]>(initialData?.skills ?? []);
+  const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>(
+    initialData?.mcp_servers ?? []
+  );
   const [maxIterations, setMaxIterations] = useState(initialData?.max_iterations ?? 20);
   const [toolTimeout, setToolTimeout] = useState(initialData?.tool_timeout ?? 120);
   const [systemPromptOverrides, setSystemPromptOverrides] = useState<string>(
@@ -40,15 +48,31 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
   );
   const [avatar, setAvatar] = useState<string | null>(initialData?.avatar ?? null);
   const [availableTools, setAvailableTools] = useState<ToolInfo[]>([]);
+  const [availableSkills, setAvailableSkills] = useState<SkillItem[]>([]);
+  const [availableMcpServers, setAvailableMcpServers] = useState<McpServerItem[]>([]);
   const [toolsLoading, setToolsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     listTools()
-      .then((res) => setAvailableTools(res.builtin))
+      .then((res) => {
+        setAvailableTools(res.builtin);
+        setAvailableSkills(res.skills);
+        setAvailableMcpServers(res.mcp_servers);
+        // 新建或旧的空数组（代表"全部"）时默认全选
+        if (!initialData || !initialData.builtin_tools?.length) {
+          setBuiltinTools(res.builtin.map((t) => t.name));
+        }
+        if (!initialData || !initialData.skills?.length) {
+          setSelectedSkills(res.skills.map((s) => s.name));
+        }
+        if (!initialData || !initialData.mcp_servers?.length) {
+          setSelectedMcpServers(res.mcp_servers.map((s) => s.name));
+        }
+      })
       .catch(() => {})
       .finally(() => setToolsLoading(false));
-  }, []);
+  }, [initialData]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -71,8 +95,8 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
         model_id: modelId,
         max_tokens: maxTokens,
         builtin_tools: builtinTools,
-        include_skills: includeSkills,
-        include_mcp: includeMcp,
+        skills: selectedSkills,
+        mcp_servers: selectedMcpServers,
         max_iterations: maxIterations,
         tool_timeout: toolTimeout,
         system_prompt_overrides: promptOverrides,
@@ -86,6 +110,18 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
   function toggleTool(toolName: string) {
     setBuiltinTools((prev) =>
       prev.includes(toolName) ? prev.filter((t) => t !== toolName) : [...prev, toolName]
+    );
+  }
+
+  function toggleSkill(skillName: string) {
+    setSelectedSkills((prev) =>
+      prev.includes(skillName) ? prev.filter((s) => s !== skillName) : [...prev, skillName]
+    );
+  }
+
+  function toggleMcpServer(serverName: string) {
+    setSelectedMcpServers((prev) =>
+      prev.includes(serverName) ? prev.filter((s) => s !== serverName) : [...prev, serverName]
     );
   }
 
@@ -182,79 +218,175 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
           <CardTitle className="text-sm">工具配置</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <label className="text-sm font-medium">内置工具</label>
-              <span className="text-xs text-muted-foreground">
-                {builtinTools.length === 0 ? "全部启用" : `${builtinTools.length} 个已选`}
-              </span>
+          {toolsLoading ? (
+            <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              加载工具列表...
             </div>
-            {toolsLoading ? (
-              <div className="flex items-center gap-2 py-2 text-sm text-muted-foreground">
-                <Loader2 className="h-3 w-3 animate-spin" />
-                加载工具列表...
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                {availableTools.map((tool) => (
-                  <label
-                    key={tool.name}
-                    className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
-                      builtinTools.includes(tool.name) || builtinTools.length === 0
-                        ? "border-primary bg-primary/5"
-                        : "border-input hover:bg-accent"
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      className="h-3.5 w-3.5 rounded border-input"
-                      checked={builtinTools.includes(tool.name) || builtinTools.length === 0}
-                      disabled={builtinTools.length === 0}
-                      onChange={() => toggleTool(tool.name)}
-                    />
-                    <div>
-                      <div className="font-medium">{tool.name}</div>
-                      <div className="text-[10px] text-muted-foreground line-clamp-1">
-                        {tool.description}
+          ) : (
+            <>
+              {/* 内置工具 */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-sm font-medium">内置工具</label>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">
+                      {builtinTools.length} / {availableTools.length}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-xs"
+                      onClick={() =>
+                        setBuiltinTools(
+                          builtinTools.length === availableTools.length
+                            ? []
+                            : availableTools.map((t) => t.name)
+                        )
+                      }
+                    >
+                      {builtinTools.length === availableTools.length ? "全不选" : "全选"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {availableTools.map((tool) => (
+                    <label
+                      key={tool.name}
+                      className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                        builtinTools.includes(tool.name)
+                          ? "border-primary bg-primary/5"
+                          : "border-input hover:bg-accent"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-3.5 w-3.5 rounded border-input"
+                        checked={builtinTools.includes(tool.name)}
+                        onChange={() => toggleTool(tool.name)}
+                      />
+                      <div>
+                        <div className="font-medium">{tool.name}</div>
+                        <div className="text-[10px] text-muted-foreground line-clamp-1">
+                          {tool.description}
+                        </div>
                       </div>
-                    </div>
-                  </label>
-                ))}
+                    </label>
+                  ))}
+                </div>
               </div>
-            )}
-            {builtinTools.length > 0 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="text-xs"
-                onClick={() => setBuiltinTools([])}
-              >
-                重置为全部工具
-              </Button>
-            )}
-          </div>
 
-          <div className="flex gap-6">
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 rounded border-input"
-                checked={includeSkills}
-                onChange={(e) => setIncludeSkills(e.target.checked)}
-              />
-              启用 Skills
-            </label>
-            <label className="flex cursor-pointer items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="h-3.5 w-3.5 rounded border-input"
-                checked={includeMcp}
-                onChange={(e) => setIncludeMcp(e.target.checked)}
-              />
-              启用 MCP
-            </label>
-          </div>
+              {/* Skills */}
+              {availableSkills.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">Skills</label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {selectedSkills.length} / {availableSkills.length}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={() =>
+                          setSelectedSkills(
+                            selectedSkills.length === availableSkills.length
+                              ? []
+                              : availableSkills.map((s) => s.name)
+                          )
+                        }
+                      >
+                        {selectedSkills.length === availableSkills.length ? "全不选" : "全选"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {availableSkills.map((skill) => (
+                      <label
+                        key={skill.name}
+                        className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                          selectedSkills.includes(skill.name)
+                            ? "border-primary bg-primary/5"
+                            : "border-input hover:bg-accent"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-input"
+                          checked={selectedSkills.includes(skill.name)}
+                          onChange={() => toggleSkill(skill.name)}
+                        />
+                        <div>
+                          <div className="font-medium">{skill.name}</div>
+                          <div className="text-[10px] text-muted-foreground line-clamp-1">
+                            {skill.description}
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* MCP Servers */}
+              {availableMcpServers.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-sm font-medium">MCP Servers</label>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-muted-foreground">
+                        {selectedMcpServers.length} / {availableMcpServers.length}
+                      </span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={() =>
+                          setSelectedMcpServers(
+                            selectedMcpServers.length === availableMcpServers.length
+                              ? []
+                              : availableMcpServers.map((s) => s.name)
+                          )
+                        }
+                      >
+                        {selectedMcpServers.length === availableMcpServers.length ? "全不选" : "全选"}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {availableMcpServers.map((server) => (
+                      <label
+                        key={server.name}
+                        className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                          selectedMcpServers.includes(server.name)
+                            ? "border-primary bg-primary/5"
+                            : "border-input hover:bg-accent"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-input"
+                          checked={selectedMcpServers.includes(server.name)}
+                          onChange={() => toggleMcpServer(server.name)}
+                        />
+                        <div>
+                          <div className="font-medium">{server.name}</div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {server.tools_count} tools
+                            {!server.connected && " (未连接)"}
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 

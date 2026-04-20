@@ -18,7 +18,6 @@ class PromptContext:
     session_id: str = ""
     skills: list[Any] = field(default_factory=list)
     mcp_tool_names: set[str] = field(default_factory=set)
-    mcp_lazy_mode: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 
 
