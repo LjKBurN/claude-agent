@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // 开发环境优化：减少不必要的编译开销
+  devIndicators: false,
+  staticPageGenerationTimeout: 60,
 };
 
 export default nextConfig;
