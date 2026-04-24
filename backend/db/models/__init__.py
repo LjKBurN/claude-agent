@@ -2,7 +2,18 @@
 
 from backend.db.models.agent_config import AgentConfigModel
 from backend.db.models.channel import Channel, ChannelSession
+from backend.db.models.knowledge_base import Document, DocumentChunk, KnowledgeBase
 from backend.db.models.mcp_server import MCPServerModel
 from backend.db.models.session import Message, Session
 
-__all__ = ["Session", "Message", "Channel", "ChannelSession", "AgentConfigModel", "MCPServerModel"]
+__all__ = [
+    "Session",
+    "Message",
+    "Channel",
+    "ChannelSession",
+    "AgentConfigModel",
+    "MCPServerModel",
+    "KnowledgeBase",
+    "Document",
+    "DocumentChunk",
+]

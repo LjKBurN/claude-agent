@@ -275,6 +275,26 @@ claude-agent/
 │   │       ├── types.py      # 类型定义
 │   │       ├── loader.py     # SKILL.md 加载器
 │   │       └── registry.py   # Skill 注册中心
+│   │   └── rag/              # RAG 文档处理
+│   │       ├── __init__.py
+│   │       ├── types.py      # 核心数据类型（ExtractedDocument, ChunkData）
+│   │       ├── pipeline.py   # DocumentPipeline（提取→分块编排）
+│   │       ├── extractors/   # 文档提取器
+│   │       │   ├── base.py   # BaseExtractor ABC
+│   │       │   ├── markdown.py
+│   │       │   ├── pdf.py    # PyMuPDF 结构化提取（字体分析 + 表格检测）
+│   │       │   ├── plaintext.py  # txt/csv/json
+│   │       │   ├── docx.py   # python-docx
+│   │       │   ├── html.py   # BeautifulSoup
+│   │       │   └── registry.py  # 扩展名→提取器映射
+│   │       ├── chunkers/     # 文档分块器
+│   │       │   ├── base.py   # BaseChunker ABC
+│   │       │   ├── markdown_chunker.py  # Markdown 标题分块
+│   │       │   ├── pdf_chunker.py       # PDF 结构感知分块（标题 + 页码）
+│   │       │   ├── recursive_chunker.py # 递归字符分块（中文标点）
+│   │       │   └── factory.py           # 分块器工厂
+│   │       └── crawler/      # URL 爬取
+│   │           └── web_crawler.py  # 异步网页爬虫
 │   │   └── context/          # 上下文管理
 │   │       ├── __init__.py
 │   │       └── manager.py    # 上下文压缩管理器
@@ -312,7 +332,8 @@ claude-agent/
 │   │   └── models/           # SQLAlchemy ORM 模型
 │   │       ├── __init__.py
 │   │       ├── session.py
-│   │       └── channel.py    # Channel + ChannelSession + ChannelRuntime 模型
+│   │       ├── channel.py    # Channel + ChannelSession + ChannelRuntime 模型
+│   │       └── knowledge_base.py  # KnowledgeBase + Document + DocumentChunk
 │   └── middleware/           # 中间件
 │       ├── __init__.py
 │       └── auth.py           # API Key 认证
@@ -345,6 +366,13 @@ claude-agent/
 | `/api/channels/{id}/stop` | POST | 停止 Channel |
 | `/api/channels/wechat/{id}/qrcode` | POST | 微信登录二维码 |
 | `/api/channels/wechat/{id}/status` | GET | 微信登录状态 |
+| `/api/knowledge-bases` | GET/POST | 知识库管理 |
+| `/api/knowledge-bases/{id}` | GET/PUT/DELETE | 知识库详情 |
+| `/api/knowledge-bases/{id}/documents` | GET | 文档列表 |
+| `/api/knowledge-bases/{id}/documents/upload` | POST | 上传文件 |
+| `/api/knowledge-bases/{id}/documents/url` | POST | URL 导入 |
+| `/api/knowledge-bases/{id}/documents/text` | POST | 文本导入 |
+| `/api/knowledge-bases/{id}/documents/{doc_id}/chunks` | GET | 文档分块列表 |
 
 ### 请求示例
 

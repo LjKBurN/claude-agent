@@ -44,6 +44,36 @@ export async function request<T>(
   return res.json() as Promise<T>;
 }
 
+export async function uploadFiles<T>(
+  path: string,
+  formData: FormData,
+  signal?: AbortSignal,
+): Promise<T> {
+  const headers: Record<string, string> = {};
+
+  if (API_KEY) {
+    headers["X-API-Key"] = API_KEY;
+  }
+
+  const res = await fetch(`${API_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
+    signal,
+  });
+
+  if (!res.ok) {
+    let detail = `HTTP ${res.status}`;
+    try {
+      const err = await res.json();
+      detail = err.detail || detail;
+    } catch {}
+    throw new ApiError(res.status, detail);
+  }
+
+  return res.json() as Promise<T>;
+}
+
 export async function requestStream(
   path: string,
   body: unknown,

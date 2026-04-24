@@ -3,9 +3,9 @@
 ## 阶段概览
 
 ```
-Phase 0 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4 ──▶ Phase 5 ──▶ Phase 6 ──▶ Phase 7 ──▶ Phase 8
- 基础架构      核心Agent     流式+工具      Skill系统      MCP集成       生产化       Web客户端     Channel前端    Agent Core解耦
-  1-2天        3-5天        3-5天         3-5天         3-5天        3-5天        3-5天        3-5天          ✅
+Phase 0 ──▶ Phase 1 ──▶ Phase 2 ──▶ Phase 3 ──▶ Phase 4 ──▶ Phase 5 ──▶ Phase 6 ──▶ Phase 7 ──▶ Phase 8 ──▶ Phase 9 ──▶ Phase 10
+ 基础架构      核心Agent     流式+工具      Skill系统      MCP集成       生产化       Web客户端     Channel前端    Agent Core   Agent配置     RAG知识库
+  1-2天        3-5天        3-5天         3-5天         3-5天        3-5天        3-5天        3-5天          ✅           ✅         🔄 Phase 1
 ```
 
 **总计**：约 4-5 周
@@ -307,4 +307,55 @@ curl -X POST /api/chat/stream \
 
 # Session 显示关联的 Agent
 curl /api/sessions
+```
+
+---
+
+## Phase 10: RAG 知识库 🔄
+
+**目标**：为 Agent 添加 RAG（检索增强生成）能力，支持知识库构建、文档管理与向量检索
+
+### Phase 10.1: 文档提取与分块 ✅
+
+**已完成**：
+
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| DB 模型 | `db/models/knowledge_base.py` | KnowledgeBase + Document + DocumentChunk |
+| API 路由 | `api/knowledge_base.py` | 知识库 CRUD + 文档上传/URL/文本导入 |
+| API Schema | `api/schemas/knowledge_base.py` | 请求/响应 Pydantic 模型 |
+| Pipeline | `core/rag/pipeline.py` | 提取→分块编排器 |
+| 提取器 | `core/rag/extractors/` | Markdown/PDF/TXT/DOCX/HTML 提取（PDF 支持字体分析 + 表格检测） |
+| 分块器 | `core/rag/chunkers/` | Markdown 标题分块 + PDF 结构感知分块（标题+页码） + 递归字符分块 |
+| URL 爬虫 | `core/rag/crawler/web_crawler.py` | 异步同域名爬取 |
+| 前端页面 | `app/knowledge/` | 知识库列表/详情/文档预览 |
+| 前端组件 | `components/knowledge/` | 上传组件(文件/URL/文本)、文档列表、分块预览 |
+
+**支持的文档格式**：md, pdf, txt, docx, html, csv, json
+
+**分块策略**：结构感知（Markdown 标题层级 / PDF 字体分析 + 表格检测） + 递归字符（中文标点优先）
+
+**PDF 结构化提取**：利用 PyMuPDF `get_text("dict")` 的字体信息检测标题层级，`find_tables()` 提取表格为 Markdown 格式，输出结构化文本后复用 MarkdownChunker 进行标题感知分块，同时保留页码元数据
+
+**DB Schema 预留**：`DocumentChunk.embedding_id` 为 Phase 2 向量化占位
+
+### Phase 10.2: 向量化与检索（待规划）
+
+**计划任务**：
+- [ ] Embedding 服务集成（OpenAI / 本地模型）
+- [ ] 向量数据库选型与集成（ChromaDB / Qdrant / pgvector）
+- [ ] 语义检索 API
+- [ ] Agent 集成 RAG 工具
+- [ ] 混合检索（关键词 + 语义）
+
+**验收**：
+```bash
+# 创建知识库
+curl -X POST /api/knowledge-bases -d '{"name":"产品文档"}'
+
+# 上传文档
+curl -X POST /api/knowledge-bases/{id}/documents/upload -F "files=@doc.pdf"
+
+# 查看 chunk
+curl /api/knowledge-bases/{id}/documents/{doc_id}/chunks
 ```

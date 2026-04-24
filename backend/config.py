@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     # MCP 配置（Claude Code 兼容格式）
     mcp_config_path: str = "./.mcp.json"  # 项目级 MCP Server 配置文件
 
+    # 知识库配置
+    kb_storage_path: str = "./data/knowledge_base_files"
+    kb_max_file_size_mb: int = 50
+
 
 @lru_cache
 def get_settings() -> Settings:

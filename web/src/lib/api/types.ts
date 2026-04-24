@@ -234,3 +234,76 @@ export interface MCPServerStatusInfo {
   resources: { uri: string; name: string; description: string; mime_type: string }[];
   prompts: { name: string; description: string; arguments: Record<string, unknown>[] }[];
 }
+
+/** Knowledge Base API types */
+
+export interface KnowledgeBaseInfo {
+  id: string;
+  name: string;
+  description: string;
+  chunk_size: number;
+  chunk_overlap: number;
+  document_count: number;
+  total_chunks: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KnowledgeBaseList {
+  knowledge_bases: KnowledgeBaseInfo[];
+  total: number;
+}
+
+export interface CreateKnowledgeBaseRequest {
+  name: string;
+  description?: string;
+  chunk_size?: number;
+  chunk_overlap?: number;
+}
+
+export interface UpdateKnowledgeBaseRequest {
+  name?: string;
+  description?: string;
+  chunk_size?: number;
+  chunk_overlap?: number;
+}
+
+export interface DocumentInfo {
+  id: string;
+  knowledge_base_id: string;
+  title: string;
+  source_type: string;
+  source_uri: string;
+  mime_type: string;
+  file_size: number;
+  status: string;
+  error_message: string;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentList {
+  documents: DocumentInfo[];
+  total: number;
+}
+
+export interface DocumentDetail extends DocumentInfo {
+  raw_text_preview: string;
+}
+
+export interface ChunkInfo {
+  id: string;
+  document_id: string;
+  chunk_index: number;
+  content: string;
+  char_count: number;
+  token_count: number;
+  section_headers: string[];
+  metadata: Record<string, unknown>;
+}
+
+export interface ChunkList {
+  chunks: ChunkInfo[];
+  total: number;
+}
