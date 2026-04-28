@@ -18,6 +18,9 @@ from backend.api.schemas.knowledge_base import (
     DocumentList,
     KnowledgeBaseInfo,
     KnowledgeBaseList,
+    SearchRequest,
+    SearchResponse,
+    SearchResultItem,
     UpdateKnowledgeBaseRequest,
     UploadTextRequest,
     UploadUrlRequest,
@@ -65,6 +68,7 @@ def _doc_to_info(doc: Document) -> DocumentInfo:
         status=doc.status,
         error_message=doc.error_message or "",
         chunk_count=doc.chunk_count or 0,
+        embedding_status=doc.embedding_status or "pending",
         created_at=doc.created_at,
         updated_at=doc.updated_at,
     )
@@ -430,6 +434,7 @@ async def reprocess_document(
 
     doc.status = "pending"
     doc.error_message = ""
+    doc.embedding_status = "pending"
     await db.commit()
 
     asyncio.create_task(_process_document_bg(doc.id))
@@ -467,11 +472,63 @@ async def list_chunks(
     return ChunkList(chunks=[_chunk_to_info(c) for c in chunks], total=total)
 
 
+# ==================== Search ====================
+
+
+@router.post("/search", response_model=SearchResponse)
+async def search_knowledge_bases(
+    request: SearchRequest,
+    db: AsyncSession = Depends(get_db),
+    _: str = Depends(verify_api_key),
+) -> SearchResponse:
+    """跨知识库语义搜索。"""
+    settings = get_settings()
+    if not settings.zhipu_api_key:
+        raise HTTPException(status_code=400, detail="未配置 ZHIPU_API_KEY，无法进行语义搜索")
+
+    # 验证知识库存在
+    for kb_id in request.knowledge_base_ids:
+        await _get_kb_or_404(kb_id, db)
+
+    # 查询向量化
+    from backend.core.rag.embedding import get_embedding_service
+
+    embedding_service = get_embedding_service()
+    query_embedding = await embedding_service.embed_query(request.query)
+
+    # 向量检索
+    from backend.core.rag.vector_store import get_vector_store
+
+    vector_store = get_vector_store()
+    results = await vector_store.search(
+        query_embedding=query_embedding,
+        kb_ids=request.knowledge_base_ids,
+        top_k=request.top_k,
+        db=db,
+    )
+
+    return SearchResponse(
+        results=[
+            SearchResultItem(
+                chunk_id=r.chunk_id,
+                document_id=r.document_id,
+                document_title=r.document_title,
+                content=r.content,
+                score=r.score,
+                chunk_index=r.chunk_index,
+                section_headers=r.section_headers,
+            )
+            for r in results
+        ],
+        total=len(results),
+    )
+
+
 # ==================== Background Processing ====================
 
 
 async def _process_document_bg(doc_id: str) -> None:
-    """后台处理文档：提取 → 分块 → 存储。"""
+    """后台处理文档：提取 → 分块 → 向量化 → 存储。"""
     async with async_session() as db:
         try:
             doc = await _get_doc_or_404(doc_id, db)
@@ -514,6 +571,7 @@ async def _process_document_bg(doc_id: str) -> None:
             )
 
             # 写入新的 chunks
+            chunk_models = []
             for chunk_data in chunks:
                 chunk_model = DocumentChunk(
                     id=str(uuid4()),
@@ -526,6 +584,12 @@ async def _process_document_bg(doc_id: str) -> None:
                     metadata_=chunk_data.metadata,
                 )
                 db.add(chunk_model)
+                chunk_models.append(chunk_model)
+
+            await db.flush()  # 确保 chunk_models 有 ID
+
+            # 向量化
+            await _embed_chunks(chunk_models, chunks, doc, db)
 
             await db.commit()
             logger.info("Processed document: %s (%d chunks)", doc.title, len(chunks))
@@ -580,19 +644,23 @@ async def _process_url_bg(
                 )
             )
 
+            first_chunk_models = []
             for chunk_data in first_chunks:
-                db.add(
-                    DocumentChunk(
-                        id=str(uuid4()),
-                        document_id=doc.id,
-                        chunk_index=chunk_data.chunk_index,
-                        content=chunk_data.content,
-                        char_count=chunk_data.char_count,
-                        token_count=chunk_data.token_count,
-                        section_headers=chunk_data.section_headers,
-                        metadata_=chunk_data.metadata,
-                    )
+                cm = DocumentChunk(
+                    id=str(uuid4()),
+                    document_id=doc.id,
+                    chunk_index=chunk_data.chunk_index,
+                    content=chunk_data.content,
+                    char_count=chunk_data.char_count,
+                    token_count=chunk_data.token_count,
+                    section_headers=chunk_data.section_headers,
+                    metadata_=chunk_data.metadata,
                 )
+                db.add(cm)
+                first_chunk_models.append(cm)
+
+            await db.flush()
+            await _embed_chunks(first_chunk_models, first_chunks, doc, db)
 
             # 其余页面作为子文档
             for page, page_chunks in results[1:]:
@@ -610,19 +678,23 @@ async def _process_url_bg(
                 db.add(sub_doc)
                 await db.flush()
 
+                sub_chunk_models = []
                 for chunk_data in page_chunks:
-                    db.add(
-                        DocumentChunk(
-                            id=str(uuid4()),
-                            document_id=sub_doc.id,
-                            chunk_index=chunk_data.chunk_index,
-                            content=chunk_data.content,
-                            char_count=chunk_data.char_count,
-                            token_count=chunk_data.token_count,
-                            section_headers=chunk_data.section_headers,
-                            metadata_=chunk_data.metadata,
-                        )
+                    cm = DocumentChunk(
+                        id=str(uuid4()),
+                        document_id=sub_doc.id,
+                        chunk_index=chunk_data.chunk_index,
+                        content=chunk_data.content,
+                        char_count=chunk_data.char_count,
+                        token_count=chunk_data.token_count,
+                        section_headers=chunk_data.section_headers,
+                        metadata_=chunk_data.metadata,
                     )
+                    db.add(cm)
+                    sub_chunk_models.append(cm)
+
+                await db.flush()
+                await _embed_chunks(sub_chunk_models, page_chunks, sub_doc, db)
 
             await db.commit()
             logger.info("Processed URL: %s (%d pages)", url, len(results))
@@ -636,3 +708,41 @@ async def _process_url_bg(
                 await db.commit()
             except Exception:
                 pass
+
+
+# ==================== Embedding Helper ====================
+
+
+async def _embed_chunks(
+    chunk_models: list[DocumentChunk],
+    chunk_data_list: list,
+    doc: Document,
+    db: AsyncSession,
+) -> None:
+    """对 chunks 进行向量化并更新 embedding 列。失败时不阻塞主流程。"""
+    settings = get_settings()
+    if not settings.zhipu_api_key:
+        doc.embedding_status = "skipped"
+        logger.debug("ZHIPU_API_KEY 未配置，跳过向量化")
+        return
+
+    doc.embedding_status = "processing"
+    await db.flush()
+
+    try:
+        from backend.core.rag.embedding import get_embedding_service
+        from backend.core.rag.vector_store import get_vector_store
+
+        embedding_service = get_embedding_service()
+        vector_store = get_vector_store()
+
+        texts = [c.content for c in chunk_data_list]
+        embeddings = await embedding_service.embed_texts(texts)
+        chunk_ids = [cm.id for cm in chunk_models]
+        await vector_store.store_embeddings(chunk_ids, embeddings, db)
+
+        doc.embedding_status = "completed"
+        logger.info("向量化完成: %d chunks", len(chunk_models))
+    except Exception:
+        doc.embedding_status = "failed"
+        logger.warning("向量化失败，chunks 将无向量（仍可用于文本检索）", exc_info=True)

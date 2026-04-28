@@ -1,15 +1,38 @@
 services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: claude_agent
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-devpassword}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build: .
     ports:
       - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
     environment:
       - API_KEY=${API_KEY:-dev-api-key}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-}
       - MODEL_ID=${MODEL_ID:-claude-sonnet-4-6-20250514}
-      - DATABASE_URL=sqlite+aiosqlite:///./data/claude_agent.db
+      - DATABASE_URL=postgresql+asyncpg://agent:${DB_PASSWORD:-devpassword}@db:5432/claude_agent
+      - ZHIPU_API_KEY=${ZHIPU_API_KEY:-}
       - DEBUG=${DEBUG:-false}
     volumes:
       - ./data:/app/data
     restart: unless-stopped
+
+volumes:
+  pgdata:

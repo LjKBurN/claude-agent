@@ -28,6 +28,17 @@ const SOURCE_ICON: Record<string, typeof FileText> = {
   text: Type,
 };
 
+const EMBEDDING_STATUS_MAP: Record<
+  string,
+  { label: string; variant: "default" | "secondary" | "destructive" | "outline" }
+> = {
+  pending: { label: "待向量化", variant: "outline" },
+  processing: { label: "向量化中", variant: "secondary" },
+  completed: { label: "已向量化", variant: "default" },
+  failed: { label: "向量化失败", variant: "destructive" },
+  skipped: { label: "未配置", variant: "outline" },
+};
+
 export function DocumentList({
   documents,
   kbId,
@@ -77,6 +88,17 @@ export function DocumentList({
                       {doc.chunk_count} chunks
                     </Badge>
                   )}
+                  {doc.status === "completed" && (() => {
+                    const es = EMBEDDING_STATUS_MAP[doc.embedding_status];
+                    return es ? (
+                      <Badge variant={es.variant} className="text-[10px]">
+                        {doc.embedding_status === "processing" && (
+                          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                        )}
+                        {es.label}
+                      </Badge>
+                    ) : null;
+                  })()}
                 </div>
                 {doc.error_message && (
                   <p className="mt-1 truncate text-xs text-destructive">

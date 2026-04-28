@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     model_id: str = "claude-sonnet-4-6-20250514"
 
     # 数据库配置
-    database_url: str = "sqlite+aiosqlite:///./data/claude_agent.db"
+    database_url: str = "postgresql+asyncpg://agent:devpassword@localhost:5432/claude_agent"
 
     # Skills 配置
     skills_dir: str = "./skills"  # 项目级 skills 目录
@@ -37,6 +37,15 @@ class Settings(BaseSettings):
     # 知识库配置
     kb_storage_path: str = "./data/knowledge_base_files"
     kb_max_file_size_mb: int = 50
+
+    # 智谱 Embedding 配置
+    zhipu_api_key: str = ""
+    zhipu_embedding_model: str = "embedding-3"
+    zhipu_embedding_dimensions: int = 1024
+    zhipu_embedding_batch_size: int = 50
+
+    # RAG 检索
+    rag_top_k: int = 5
 
 
 @lru_cache

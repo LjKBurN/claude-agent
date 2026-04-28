@@ -7,7 +7,7 @@
 | 后端语言 | Python 3.10+ |
 | 后端框架 | FastAPI |
 | Agent | Agent Core (LLM + Tools + Loop) |
-| 数据库 | SQLite → PostgreSQL |
+| 数据库 | PostgreSQL + pgvector |
 | 部署 | Docker |
 | 认证 | API Key |
 | 前端框架 | Next.js 16 (App Router) |
@@ -53,11 +53,13 @@
 │  (内置工具 │ Skill │ MCP)                 │
 └──────────────┬──────────────────────────┘
                ▼
-┌──────────────────┬──────────────┐
-│ SQLite (存储)    │ LLM Provider │
-│ - 会话/消息      │ (Anthropic等)│
-│ - 配置           │              │
-└──────────────────┴──────────────┘
+┌──────────────────┬──────────────┬──────────────┐
+│ PostgreSQL       │ LLM Provider │ 智谱 AI      │
+│ + pgvector       │ (Anthropic等)│ (Embedding)  │
+│ - 会话/消息      │              │              │
+│ - 配置           │              │              │
+│ - 向量存储       │              │              │
+└──────────────────┴──────────────┴──────────────┘
 ```
 
 ## 核心概念
@@ -262,7 +264,8 @@ claude-agent/
 │   │   │   ├── registry.py   # UnifiedToolRegistry 统一注册表
 │   │   │   ├── bash.py       # Shell 命令工具
 │   │   │   ├── file.py       # 文件操作工具
-│   │   │   └── http.py       # HTTP 请求工具
+│   │   │   ├── http.py       # HTTP 请求工具
+│   │   │   └── knowledge_search.py  # 知识库语义检索工具
 │   │   ├── tool_executor.py  # 统一工具执行器
 │   │   ├── tools/            # 工具模块（可扩展）
 │   │   │   ├── __init__.py   # 工具注册入口
@@ -279,6 +282,8 @@ claude-agent/
 │   │       ├── __init__.py
 │   │       ├── types.py      # 核心数据类型（ExtractedDocument, ChunkData）
 │   │       ├── pipeline.py   # DocumentPipeline（提取→分块编排）
+│   │       ├── embedding.py  # 智谱 Embedding 服务（异步批量向量化）
+│   │       ├── vector_store.py # pgvector 向量存储与语义检索
 │   │       ├── extractors/   # 文档提取器
 │   │       │   ├── base.py   # BaseExtractor ABC
 │   │       │   ├── markdown.py
@@ -333,7 +338,7 @@ claude-agent/
 │   │       ├── __init__.py
 │   │       ├── session.py
 │   │       ├── channel.py    # Channel + ChannelSession + ChannelRuntime 模型
-│   │       └── knowledge_base.py  # KnowledgeBase + Document + DocumentChunk
+│   │       └── knowledge_base.py  # KnowledgeBase + Document(embedding_status) + DocumentChunk
 │   └── middleware/           # 中间件
 │       ├── __init__.py
 │       └── auth.py           # API Key 认证
@@ -373,6 +378,7 @@ claude-agent/
 | `/api/knowledge-bases/{id}/documents/url` | POST | URL 导入 |
 | `/api/knowledge-bases/{id}/documents/text` | POST | 文本导入 |
 | `/api/knowledge-bases/{id}/documents/{doc_id}/chunks` | GET | 文档分块列表 |
+| `/api/knowledge-bases/search` | POST | 跨知识库语义搜索 |
 
 ### 请求示例
 

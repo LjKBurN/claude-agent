@@ -4,7 +4,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, HttpUrl
 
-
 # ==================== Knowledge Base ====================
 
 
@@ -64,6 +63,7 @@ class DocumentInfo(BaseModel):
     status: str
     error_message: str
     chunk_count: int
+    embedding_status: str = "pending"
     created_at: datetime
     updated_at: datetime
 
@@ -93,4 +93,28 @@ class ChunkInfo(BaseModel):
 
 class ChunkList(BaseModel):
     chunks: list[ChunkInfo]
+    total: int
+
+
+# ==================== Search ====================
+
+
+class SearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=2000)
+    knowledge_base_ids: list[str] = Field(..., min_length=1)
+    top_k: int = Field(default=5, ge=1, le=50)
+
+
+class SearchResultItem(BaseModel):
+    chunk_id: str
+    document_id: str
+    document_title: str
+    content: str
+    score: float
+    chunk_index: int
+    section_headers: list[str]
+
+
+class SearchResponse(BaseModel):
+    results: list[SearchResultItem]
     total: int

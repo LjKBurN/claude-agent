@@ -2,10 +2,15 @@
 
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, Text
+from pgvector.sqlalchemy import Vector
+from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from backend.config import get_settings
 from backend.db import Base
+
+# 向量维度从配置读取，延迟求值
+_embedding_dimensions = get_settings().zhipu_embedding_dimensions
 
 
 class KnowledgeBase(Base):
@@ -49,6 +54,9 @@ class Document(Base):
     )  # pending / processing / completed / failed
     error_message: Mapped[str] = mapped_column(Text, default="")
     chunk_count: Mapped[int] = mapped_column(Integer, default=0)
+    embedding_status: Mapped[str] = mapped_column(
+        String(20), default="pending"
+    )  # pending / processing / completed / failed / skipped
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
@@ -79,7 +87,7 @@ class DocumentChunk(Base):
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     section_headers: Mapped[list] = mapped_column(JSON, default=list)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
-    embedding_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    embedding = mapped_column(Vector(_embedding_dimensions), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

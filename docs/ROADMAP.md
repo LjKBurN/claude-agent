@@ -339,23 +339,46 @@ curl /api/sessions
 
 **DB Schema 预留**：`DocumentChunk.embedding_id` 为 Phase 2 向量化占位
 
-### Phase 10.2: 向量化与检索（待规划）
+### Phase 10.2: 向量化与检索 ✅
 
-**计划任务**：
-- [ ] Embedding 服务集成（OpenAI / 本地模型）
-- [ ] 向量数据库选型与集成（ChromaDB / Qdrant / pgvector）
-- [ ] 语义检索 API
-- [ ] Agent 集成 RAG 工具
-- [ ] 混合检索（关键词 + 语义）
+**已完成**：
+
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| Embedding 服务 | `core/rag/embedding.py` | 智谱 embedding-3 API 异步调用（批量分批、指数退避重试） |
+| 向量存储 | `core/rag/vector_store.py` | pgvector 向量存储与余弦相似度检索（HNSW 索引） |
+| 搜索 API | `api/knowledge_base.py` | `POST /api/knowledge-bases/search` 跨知识库语义搜索 |
+| 搜索 Schema | `api/schemas/knowledge_base.py` | SearchRequest / SearchResponse / SearchResultItem |
+| Agent 工具 | `core/tools/knowledge_search.py` | `knowledge_search` Agent 可调用的语义检索工具 |
+| DB 模型 | `db/models/knowledge_base.py` | DocumentChunk.embedding (pgvector Vector 列) |
+| 数据库初始化 | `db/database.py` | pgvector 扩展 + HNSW 索引自动创建 |
+| 配置 | `config.py` | 智谱 API Key / 模型 / 维度 / batch_size 配置 |
+| 基础设施 | `docker-compose.yml` | PostgreSQL + pgvector 服务（pgvector/pgvector:pg17） |
+
+**Embedding 配置**：
+- 模型：智谱 embedding-3
+- 向量维度：1024（可配置 256/512/1024/2048）
+- 批处理：50 条/批
+- 重试：429 限流指数退避（最多 3 次）
+
+**处理流程**：
+```
+文档上传 → 提取 → 分块 → 批量向量化（智谱 API）→ 存入 PostgreSQL (pgvector)
+                                              ↓
+用户查询 → 查询向量化 → pgvector 余弦相似度检索（HNSW 索引）→ Top-K 结果
+```
+
+**优雅降级**：向量化失败不阻塞文档处理，chunks 仍可保存（无 embedding 列），搜索时跳过无向量的 chunks。
 
 **验收**：
 ```bash
 # 创建知识库
 curl -X POST /api/knowledge-bases -d '{"name":"产品文档"}'
 
-# 上传文档
+# 上传文档（自动提取+分块+向量化）
 curl -X POST /api/knowledge-bases/{id}/documents/upload -F "files=@doc.pdf"
 
-# 查看 chunk
-curl /api/knowledge-bases/{id}/documents/{doc_id}/chunks
+# 语义搜索
+curl -X POST /api/knowledge-bases/search \
+  -d '{"query":"产品功能介绍","knowledge_base_ids":["{id}"],"top_k":5}'
 ```

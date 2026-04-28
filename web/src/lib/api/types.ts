@@ -279,6 +279,7 @@ export interface DocumentInfo {
   status: string;
   error_message: string;
   chunk_count: number;
+  embedding_status: string;
   created_at: string;
   updated_at: string;
 }

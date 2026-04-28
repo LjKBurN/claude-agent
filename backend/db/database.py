@@ -1,9 +1,8 @@
 """数据库连接和初始化。"""
 
 import logging
-from pathlib import Path
 
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -31,41 +30,29 @@ async_session = async_sessionmaker(
 )
 
 
+def _is_postgresql() -> bool:
+    """检查当前数据库是否为 PostgreSQL。"""
+    return "postgresql" in get_settings().database_url
+
+
 async def init_db():
-    """初始化数据库（创建表 + 补齐已有表的新列）。"""
+    """初始化数据库（创建表）。"""
     # 确保所有 ORM 模型已注册到 Base.metadata
     import backend.db.models  # noqa: F401
 
-    # 确保数据目录存在
-    db_path = Path("./data")
-    db_path.mkdir(exist_ok=True)
-
     async with engine.begin() as conn:
-        # 1. 创建不存在的表
+        # PostgreSQL: 创建 pgvector 扩展（需在创建表之前）
+        if _is_postgresql():
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
         await conn.run_sync(Base.metadata.create_all)
 
-        # 2. 为已有表补齐 ORM 中定义但 DB 中缺失的列
-        def _migrate(sync_conn):
-            db_tables = inspect(sync_conn).get_table_names()
-            for table in Base.metadata.sorted_tables:
-                if table.name not in db_tables:
-                    continue
-                existing = {col["name"] for col in inspect(sync_conn).get_columns(table.name)}
-                for column in table.columns:
-                    if column.name not in existing:
-                        col_type = column.type.compile(sync_conn.dialect)
-                        nullable = "" if column.nullable else " NOT NULL"
-                        default = ""
-                        if column.server_default is not None:
-                            default = f" DEFAULT {column.server_default.arg.text}"
-                        sql = (
-                            f"ALTER TABLE {table.name} "
-                            f"ADD COLUMN {column.name} {col_type}{nullable}{default}"
-                        )
-                        logger.info("Auto-migrate: %s", sql)
-                        sync_conn.execute(text(sql))
-
-        await conn.run_sync(_migrate)
+        # PostgreSQL: 创建 HNSW 向量索引
+        if _is_postgresql():
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_embedding "
+                "ON document_chunks USING hnsw (embedding vector_cosine_ops)"
+            ))
 
 
 async def get_db() -> AsyncSession:
