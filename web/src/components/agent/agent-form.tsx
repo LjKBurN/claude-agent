@@ -5,9 +5,11 @@ import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listTools } from "@/lib/api/tools";
+import { listKnowledgeBases } from "@/lib/api/knowledge-base";
 import type {
   AgentConfigInfo,
   CreateAgentConfigRequest,
+  KnowledgeBaseInfo,
   McpServerItem,
   SkillItem,
   ToolInfo,
@@ -37,6 +39,9 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
   const [selectedMcpServers, setSelectedMcpServers] = useState<string[]>(
     initialData?.mcp_servers ?? []
   );
+  const [selectedKnowledgeBases, setSelectedKnowledgeBases] = useState<string[]>(
+    initialData?.knowledge_base_ids ?? []
+  );
   const [maxIterations, setMaxIterations] = useState(initialData?.max_iterations ?? 20);
   const [toolTimeout, setToolTimeout] = useState(initialData?.tool_timeout ?? 120);
   const [systemPromptOverrides, setSystemPromptOverrides] = useState<string>(
@@ -50,6 +55,7 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
   const [availableTools, setAvailableTools] = useState<ToolInfo[]>([]);
   const [availableSkills, setAvailableSkills] = useState<SkillItem[]>([]);
   const [availableMcpServers, setAvailableMcpServers] = useState<McpServerItem[]>([]);
+  const [availableKnowledgeBases, setAvailableKnowledgeBases] = useState<KnowledgeBaseInfo[]>([]);
   const [toolsLoading, setToolsLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -72,6 +78,10 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
       })
       .catch(() => {})
       .finally(() => setToolsLoading(false));
+
+    listKnowledgeBases()
+      .then((res) => setAvailableKnowledgeBases(res.knowledge_bases))
+      .catch(() => {});
   }, [initialData]);
 
   async function handleSubmit(e: React.FormEvent) {
@@ -97,6 +107,7 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
         builtin_tools: builtinTools,
         skills: selectedSkills,
         mcp_servers: selectedMcpServers,
+        knowledge_base_ids: selectedKnowledgeBases,
         max_iterations: maxIterations,
         tool_timeout: toolTimeout,
         system_prompt_overrides: promptOverrides,
@@ -122,6 +133,12 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
   function toggleMcpServer(serverName: string) {
     setSelectedMcpServers((prev) =>
       prev.includes(serverName) ? prev.filter((s) => s !== serverName) : [...prev, serverName]
+    );
+  }
+
+  function toggleKnowledgeBase(kbId: string) {
+    setSelectedKnowledgeBases((prev) =>
+      prev.includes(kbId) ? prev.filter((id) => id !== kbId) : [...prev, kbId]
     );
   }
 
@@ -378,6 +395,38 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
                           <div className="text-[10px] text-muted-foreground">
                             {server.tools_count} tools
                             {!server.connected && " (未连接)"}
+                          </div>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Knowledge Bases */}
+              {availableKnowledgeBases.length > 0 && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">知识库</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {availableKnowledgeBases.map((kb) => (
+                      <label
+                        key={kb.id}
+                        className={`flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm transition-colors ${
+                          selectedKnowledgeBases.includes(kb.id)
+                            ? "border-primary bg-primary/5"
+                            : "border-input hover:bg-accent"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 rounded border-input"
+                          checked={selectedKnowledgeBases.includes(kb.id)}
+                          onChange={() => toggleKnowledgeBase(kb.id)}
+                        />
+                        <div>
+                          <div className="font-medium">{kb.name}</div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {kb.document_count} 文档 · {kb.total_chunks} 分块
                           </div>
                         </div>
                       </label>

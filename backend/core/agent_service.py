@@ -114,14 +114,20 @@ class AgentService:
         """获取所有 MCP 工具名称集合。"""
         return {t.name for t in self._get_registry().by_source("mcp")}
 
-    def _build_system_prompt(
-        self, channel: str = "web", allowed_skills: list[str] | None = None
+    async def _build_system_prompt(
+        self,
+        channel: str = "web",
+        allowed_skills: list[str] | None = None,
+        agent_config: AgentConfig | None = None,
+        user_message: str = "",
     ) -> str:
         """构建 system prompt。
 
         Args:
             channel: 消息渠道
             allowed_skills: 允许的 skill 名称列表。None/空 = 全部 skills。
+            agent_config: Agent 配置（用于知识库检索）。
+            user_message: 用户最新消息（用于 Pre-Retrieval）。
         """
         builder = get_system_prompt_builder()
         all_skills = skill_registry.list_for_tool()
@@ -133,12 +139,65 @@ class AgentService:
 
         mcp_tool_names = self._get_mcp_tool_names()
 
+        # Pre-Retrieval：自动检索知识库
+        rag_context = ""
+        if agent_config and agent_config.knowledge_base_ids and user_message:
+            rag_context = await self._pre_retrieve(
+                agent_config.knowledge_base_ids, user_message
+            )
+
         context = PromptContext(
             channel=channel,
             skills=skills,
             mcp_tool_names=mcp_tool_names,
+            extra={
+                "rag_context": rag_context,
+                "knowledge_base_ids": (
+                    agent_config.knowledge_base_ids if agent_config else []
+                ),
+            },
         )
         return builder.build(context)
+
+    async def _pre_retrieve(
+        self, knowledge_base_ids: list[str], query: str, top_k: int = 3
+    ) -> str:
+        """Pre-Retrieval：根据用户消息自动检索知识库。"""
+        settings = get_settings()
+        if not settings.zhipu_api_key:
+            return ""
+
+        try:
+            from backend.core.rag.embedding import get_embedding_service
+            from backend.core.rag.vector_store import get_vector_store
+            from backend.db.database import async_session
+
+            embedding_service = get_embedding_service()
+            query_embedding = await embedding_service.embed_query(query)
+
+            vector_store = get_vector_store()
+            async with async_session() as db:
+                results = await vector_store.search(
+                    query_embedding=query_embedding,
+                    kb_ids=knowledge_base_ids,
+                    top_k=top_k,
+                    db=db,
+                )
+
+            if not results:
+                return ""
+
+            parts = []
+            for i, r in enumerate(results, 1):
+                header = f"[{i}] {r.document_title}"
+                if r.section_headers:
+                    header += f" > {' > '.join(r.section_headers)}"
+                parts.append(f"{header}\n{r.content}")
+
+            return "\n\n---\n\n".join(parts)
+        except Exception:
+            logger.warning("Pre-Retrieval 失败", exc_info=True)
+            return ""
 
     # ==================== 公开接口 ====================
 
@@ -176,8 +235,11 @@ class AgentService:
             runner, agent_config = await self._resolve_runner(db, session.agent_config_id)
 
         allowed_skills = agent_config.skills if agent_config and agent_config.skills else None
+        system_prompt = await self._build_system_prompt(
+            channel, allowed_skills, agent_config, user_message
+        )
         text, tool_call_records, approval_info, content_blocks, orig_count, agent_msgs = (
-            await runner.run(messages, self._build_system_prompt(channel, allowed_skills))
+            await runner.run(messages, system_prompt)
         )
         # ToolCallRecord → API 层 ToolCall
         api_tool_calls = [
@@ -228,7 +290,8 @@ class AgentService:
         allowed_skills = agent_config.skills if agent_config and agent_config.skills else None
         async for event in self._stream_agent_response(
             db, session, messages, channel=channel, runner=runner,
-            allowed_skills=allowed_skills,
+            allowed_skills=allowed_skills, agent_config=agent_config,
+            user_message=user_message,
         ):
             yield event
 
@@ -297,6 +360,7 @@ class AgentService:
                     builtin_tools=model.builtin_tools or [],
                     skills=model.skills or [],
                     mcp_servers=model.mcp_servers or [],
+                    knowledge_base_ids=model.knowledge_base_ids or [],
                     max_iterations=model.max_iterations,
                     tool_timeout=model.tool_timeout,
                     auto_approve_safe=model.auto_approve_safe,
@@ -356,6 +420,8 @@ class AgentService:
         self, db, session, messages, *, channel: str = "web",
         runner: AgentRunner | None = None,
         allowed_skills: list[str] | None = None,
+        agent_config: AgentConfig | None = None,
+        user_message: str = "",
     ) -> AsyncGenerator[str, None]:
         """运行 agent 流式响应并 yield SSE 事件。"""
         from backend.api.schemas.chat import ToolCall
@@ -367,9 +433,10 @@ class AgentService:
         tool_calls: list[ToolCall] = []
 
         agent_runner = runner or self._get_runner()
-        async for event in agent_runner.run_stream(
-            messages, self._build_system_prompt(channel, allowed_skills)
-        ):
+        system_prompt = await self._build_system_prompt(
+            channel, allowed_skills, agent_config, user_message
+        )
+        async for event in agent_runner.run_stream(messages, system_prompt):
             if event["type"] == "text":
                 full_response += event["content"]
                 yield self._sse_event("text", {"content": event["content"]})

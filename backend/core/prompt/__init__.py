@@ -4,6 +4,7 @@ from backend.core.prompt.builder import PromptContext, PromptProvider, SystemPro
 from backend.core.prompt.providers import (
     ChannelContextProvider,
     CoreIdentityProvider,
+    KnowledgeContextProvider,
     MemoryPlaceholderProvider,
     SkillsSummaryProvider,
     TemporalContextProvider,
@@ -13,6 +14,7 @@ from backend.core.prompt.providers import (
 # 按顺序组装 builder（单例）
 _system_prompt_builder = SystemPromptBuilder(providers=[
     CoreIdentityProvider(),
+    KnowledgeContextProvider(),
     SkillsSummaryProvider(),
     ToolGuidelinesProvider(),
     TemporalContextProvider(),

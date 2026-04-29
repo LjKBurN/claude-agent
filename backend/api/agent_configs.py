@@ -33,6 +33,7 @@ def _model_to_info(model: AgentConfigModel) -> AgentConfigInfo:
         builtin_tools=model.builtin_tools or [],
         skills=model.skills or [],
         mcp_servers=model.mcp_servers or [],
+        knowledge_base_ids=model.knowledge_base_ids or [],
         max_iterations=model.max_iterations,
         tool_timeout=model.tool_timeout,
         auto_approve_safe=model.auto_approve_safe,

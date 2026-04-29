@@ -380,6 +380,14 @@ claude-agent/
 | `/api/knowledge-bases/{id}/documents/{doc_id}/chunks` | GET | 文档分块列表 |
 | `/api/knowledge-bases/search` | POST | 跨知识库语义搜索 |
 
+### Agent RAG（Hybrid）流程
+
+Agent 绑定知识库后，采用 Hybrid RAG 策略：
+
+1. **Pre-Retrieval**：用户消息到达后，自动从绑定知识库检索 top-3 相关片段，注入 system prompt 的 `<knowledge_context>` section
+2. **Tool-Augmented**：保留 `knowledge_search` 工具，LLM 可主动深入检索
+3. Agent 配置通过 `knowledge_base_ids` 字段绑定知识库
+
 ### 请求示例
 
 ```json

@@ -28,6 +28,9 @@ class AgentConfigModel(Base):
     skills: Mapped[list] = mapped_column(JSON, default=list)
     mcp_servers: Mapped[list] = mapped_column(JSON, default=list)
 
+    # 知识库绑定
+    knowledge_base_ids: Mapped[list] = mapped_column(JSON, default=list)
+
     # 行为
     max_iterations: Mapped[int] = mapped_column(Integer, default=20)
     tool_timeout: Mapped[int] = mapped_column(Integer, default=120)

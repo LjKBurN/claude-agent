@@ -130,6 +130,7 @@ export interface AgentConfigInfo {
   builtin_tools: string[];
   skills: string[];
   mcp_servers: string[];
+  knowledge_base_ids: string[];
   max_iterations: number;
   tool_timeout: number;
   auto_approve_safe: boolean;
@@ -152,6 +153,7 @@ export interface CreateAgentConfigRequest {
   builtin_tools?: string[];
   skills?: string[];
   mcp_servers?: string[];
+  knowledge_base_ids?: string[];
   max_iterations?: number;
   tool_timeout?: number;
   auto_approve_safe?: boolean;

@@ -14,8 +14,8 @@ logger = logging.getLogger(__name__)
     description=(
         "Search knowledge bases for relevant document fragments using semantic similarity. "
         "Returns the most relevant text chunks along with their source document names and "
-        "similarity scores. Use this tool when you need to retrieve information from the "
-        "user's uploaded documents or knowledge bases."
+        "similarity scores. Use this tool when you need more detailed information beyond "
+        "what was already provided in the knowledge context."
     ),
     input_schema={
         "type": "object",
@@ -27,20 +27,20 @@ logger = logging.getLogger(__name__)
             "knowledge_base_ids": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "List of knowledge base IDs to search in.",
+                "description": "List of knowledge base IDs to search in. Use the IDs from the knowledge context section.",
             },
             "top_k": {
                 "type": "integer",
                 "description": "Number of top results to return (default: 5).",
             },
         },
-        "required": ["query", "knowledge_base_ids"],
+        "required": ["query"],
     },
 )
 async def knowledge_search(arguments: dict) -> str:
     """语义检索知识库。"""
     query = arguments["query"]
-    kb_ids = arguments["knowledge_base_ids"]
+    kb_ids = arguments.get("knowledge_base_ids", [])
     top_k = arguments.get("top_k", 5)
 
     from backend.config import get_settings

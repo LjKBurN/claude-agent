@@ -25,6 +25,9 @@ class CreateAgentConfigRequest(BaseModel):
     mcp_servers: list[str] = Field(
         default_factory=list, description="启用的 MCP Server，空=全部"
     )
+    knowledge_base_ids: list[str] = Field(
+        default_factory=list, description="绑定的知识库 ID 列表"
+    )
 
     # 行为
     max_iterations: int = Field(20, ge=1, le=100, description="最大工具迭代次数")
@@ -50,6 +53,7 @@ class UpdateAgentConfigRequest(BaseModel):
     builtin_tools: list[str] | None = None
     skills: list[str] | None = None
     mcp_servers: list[str] | None = None
+    knowledge_base_ids: list[str] | None = None
     max_iterations: int | None = Field(None, ge=1, le=100)
     tool_timeout: int | None = Field(None, ge=10, le=600)
     auto_approve_safe: bool | None = None
@@ -68,6 +72,7 @@ class AgentConfigInfo(BaseModel):
     builtin_tools: list[str]
     skills: list[str]
     mcp_servers: list[str]
+    knowledge_base_ids: list[str]
     max_iterations: int
     tool_timeout: int
     auto_approve_safe: bool

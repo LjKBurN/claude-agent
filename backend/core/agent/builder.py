@@ -35,6 +35,7 @@ class AgentConfig:
     builtin_tools: list[str] = field(default_factory=list)  # 空 = 全部
     skills: list[str] = field(default_factory=list)          # 空 = 全部 skills
     mcp_servers: list[str] = field(default_factory=list)     # 空 = 全部 MCP servers
+    knowledge_base_ids: list[str] = field(default_factory=list)  # 绑定的知识库
 
     # 行为
     max_iterations: int = 20
@@ -56,6 +57,7 @@ class AgentConfig:
             builtin_tools=data.get("builtin_tools", []),
             skills=data.get("skills", []),
             mcp_servers=data.get("mcp_servers", []),
+            knowledge_base_ids=data.get("knowledge_base_ids", []),
             max_iterations=data.get("max_iterations", 20),
             tool_timeout=data.get("tool_timeout", 120),
             request_timeout=data.get("request_timeout", 300),
@@ -72,6 +74,7 @@ class AgentConfig:
             "builtin_tools": self.builtin_tools,
             "skills": self.skills,
             "mcp_servers": self.mcp_servers,
+            "knowledge_base_ids": self.knowledge_base_ids,
             "max_iterations": self.max_iterations,
             "tool_timeout": self.tool_timeout,
             "request_timeout": self.request_timeout,
