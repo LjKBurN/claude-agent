@@ -15,6 +15,12 @@ from typing import Any
 
 from backend.core.agent.approval import ApprovalManager
 from backend.core.agent.events import AgentEvent, EventBus, EventType
+from backend.core.agent.hooks import (
+    HookContext,
+    run_after_tool_hooks,
+    run_before_llm_hooks,
+    run_before_tool_hooks,
+)
 from backend.core.agent.llm.base import LLMProvider
 from backend.core.agent.utils import serialize_blocks
 from backend.core.tools.registry import UnifiedToolRegistry
@@ -64,6 +70,7 @@ class AgentLoop:
         max_iterations: int = DEFAULT_MAX_ITERATIONS,
         tool_timeout: int = DEFAULT_TOOL_TIMEOUT,
         request_timeout: int = DEFAULT_REQUEST_TIMEOUT,
+        hooks: list[Any] | None = None,
     ):
         self.llm = llm
         self.registry = registry
@@ -72,6 +79,7 @@ class AgentLoop:
         self.max_iterations = max_iterations
         self.tool_timeout = tool_timeout
         self.request_timeout = request_timeout
+        self.hooks = hooks or []
 
     async def run(
         self,
@@ -105,9 +113,17 @@ class AgentLoop:
         tool_calls: list[ToolCallRecord] = []
         original_count = len(messages)
 
-        for _ in range(self.max_iterations):
+        for iteration in range(self.max_iterations):
+            # Hook: before_llm
+            ctx = await run_before_llm_hooks(
+                self.hooks, HookContext(
+                    messages=messages, system_prompt=system,
+                    iteration=iteration,   
+                ),
+            )
+
             try:
-                response = await self.llm.create(messages, tools, system)
+                response = await self.llm.create(ctx.messages, tools, ctx.system_prompt)
             except Exception as e:
                 logger.error(f"LLM call failed: {e}")
                 await self.events.emit(AgentEvent(
@@ -123,7 +139,7 @@ class AgentLoop:
 
             if response.has_tool_calls():
                 # 审批检查
-                dangerous = self._filter_dangerous(response.content_blocks, tools)
+                dangerous = self._filter_dangerous(response.content_blocks)
                 if dangerous:
                     return AgentLoopResult(
                         text=response.text,
@@ -138,7 +154,7 @@ class AgentLoop:
                 # 执行工具
                 messages.append({"role": "assistant", "content": response.content_blocks})
                 tool_results = await self._execute_all_tools(
-                    response.content_blocks, tool_calls, messages, tools,
+                    response.content_blocks, tool_calls, messages,
                 )
                 messages.append({"role": "user", "content": tool_results})
 
@@ -191,9 +207,19 @@ class AgentLoop:
         tool_calls: list[ToolCallRecord] = []
         full_text = ""
 
-        for _ in range(self.max_iterations):
+        for iteration in range(self.max_iterations):
+            # Hook: before_llm
+            ctx = await run_before_llm_hooks(
+                self.hooks, HookContext(
+                    messages=messages, system_prompt=system,
+                    iteration=iteration,
+                ),
+            )
+
             try:
-                async for chunk in self.llm.create_stream_with_result(messages, tools, system):
+                async for chunk in self.llm.create_stream_with_result(
+                    ctx.messages, tools, ctx.system_prompt,
+                ):
                     if chunk.type == "text":
                         full_text += chunk.text
                         await self.events.emit(AgentEvent(
@@ -228,7 +254,7 @@ class AgentLoop:
 
             if final_message.stop_reason == "tool_use":
                 # 审批检查
-                dangerous = self._filter_dangerous(final_message.content, tools)
+                dangerous = self._filter_dangerous(final_message.content)
                 if dangerous:
                     await self.events.emit(AgentEvent(
                         type=EventType.APPROVAL_NEEDED,
@@ -256,7 +282,7 @@ class AgentLoop:
                         continue
 
                     output, extra_events = await self._execute_single_tool(
-                        block.name, block.input, block.id, messages, tools,
+                        block.name, block.input, block.id, messages,
                     )
 
                     # 发出额外事件（Skill 加载等）
@@ -301,7 +327,6 @@ class AgentLoop:
         tool_input: dict,
         tool_id: str,
         messages: list[dict],
-        tools: list[dict],
     ) -> tuple[str, list[AgentEvent]]:
         """执行单个工具调用。
 
@@ -313,6 +338,12 @@ class AgentLoop:
         # 检查是否是 MCP 工具
         mcp_tool_names = {t.name for t in self.registry.by_source("mcp")}
 
+        # Hook: before_tool — 返回 None 表示拒绝执行
+        resolved_input = await run_before_tool_hooks(self.hooks, tool_name, tool_input)
+        if resolved_input is None:
+            return f"Tool '{tool_name}' blocked by hook", extra_events
+        tool_input = resolved_input
+
         try:
             if tool_name in mcp_tool_names:
                 # MCP 工具直接调用
@@ -321,6 +352,7 @@ class AgentLoop:
                     mcp_manager.call_tool(tool_name, tool_input),
                     timeout=self.tool_timeout,
                 )
+                output = await run_after_tool_hooks(self.hooks, tool_name, tool_input, output)
                 return output, extra_events
 
             # 使用 ToolExecutor 执行（内置工具 + Skill + MCP Search）
@@ -340,7 +372,8 @@ class AgentLoop:
                     data={"name": skill_name, "message": f'The "{skill_name}" skill is loading'},
                 ))
 
-            return result.output, extra_events
+            output = await run_after_tool_hooks(self.hooks, tool_name, tool_input, result.output)
+            return output, extra_events
 
         except asyncio.TimeoutError:
             return f"Tool '{tool_name}' timed out ({self.tool_timeout}s)", extra_events
@@ -352,7 +385,6 @@ class AgentLoop:
         content_blocks: list[Any],
         tool_calls: list[ToolCallRecord],
         messages: list[dict],
-        tools: list[dict],
     ) -> list[dict]:
         """执行所有工具调用块（非流式）。"""
         results = []
@@ -361,7 +393,7 @@ class AgentLoop:
                 continue
 
             output, _ = await self._execute_single_tool(
-                block.name, block.input, block.id, messages, tools,
+                block.name, block.input, block.id, messages,
             )
             tool_calls.append(ToolCallRecord(
                 name=block.name, input=block.input, output=output,
@@ -376,7 +408,7 @@ class AgentLoop:
 
     # ==================== 辅助方法 ====================
 
-    def _filter_dangerous(self, content_blocks: list[Any], tools: list[dict]) -> list[dict]:
+    def _filter_dangerous(self, content_blocks: list[Any]) -> list[dict]:
         """从 LLM 响应中过滤出需要审批的工具调用。
 
         同时考虑 MCP 工具白名单（MCP 工具默认安全）。

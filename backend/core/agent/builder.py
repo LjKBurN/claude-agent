@@ -11,6 +11,7 @@ from typing import Any
 
 from backend.core.agent.approval import ApprovalManager
 from backend.core.agent.events import EventBus
+from backend.core.agent.hooks import KnowledgeRetrievalHook
 from backend.core.agent.llm import LLMConfig
 from backend.core.agent.llm.anthropic_provider import AnthropicProvider
 from backend.core.agent.loop import AgentLoop
@@ -113,6 +114,9 @@ class AgentBuilder:
         # 4. 构建事件总线
         event_bus = EventBus()
 
+        # 5. 构建生命周期 hooks
+        hooks = self._build_hooks()
+
         return AgentLoop(
             llm=llm,
             registry=registry,
@@ -121,6 +125,7 @@ class AgentBuilder:
             max_iterations=self.config.max_iterations,
             tool_timeout=self.config.tool_timeout,
             request_timeout=self.config.request_timeout,
+            hooks=hooks,
         )
 
     def _build_llm(self, api_key: str, base_url: str | None) -> Any:
@@ -146,3 +151,51 @@ class AgentBuilder:
         )
 
         return registry
+
+    def _build_hooks(self) -> list:
+        """根据配置创建生命周期 hooks。"""
+        hooks = []
+        if self.config.knowledge_base_ids:
+            hooks.append(KnowledgeRetrievalHook(
+                knowledge_base_ids=self.config.knowledge_base_ids,
+                retrieve_fn=self._make_retrieve_fn(),
+            ))
+        return hooks
+
+    def _make_retrieve_fn(self):
+        """创建知识库检索函数（在组装层解析基础设施依赖）。"""
+        async def retrieve(query: str, kb_ids: list[str], top_k: int) -> str:
+            from backend.config import get_settings
+            settings = get_settings()
+            if not settings.zhipu_api_key:
+                return ""
+
+            from backend.core.rag.embedding import get_embedding_service
+            from backend.core.rag.vector_store import get_vector_store
+            from backend.db.database import async_session
+
+            embedding_service = get_embedding_service()
+            query_embedding = await embedding_service.embed_query(query)
+
+            vector_store = get_vector_store()
+            async with async_session() as db:
+                results = await vector_store.search(
+                    query_embedding=query_embedding,
+                    kb_ids=kb_ids,
+                    top_k=top_k,
+                    db=db,
+                )
+
+            if not results:
+                return ""
+
+            parts = []
+            for i, r in enumerate(results, 1):
+                header = f"[{i}] {r.document_title}"
+                if r.section_headers:
+                    header += f" > {' > '.join(r.section_headers)}"
+                parts.append(f"{header}\n{r.content}")
+
+            return "\n\n---\n\n".join(parts)
+
+        return retrieve

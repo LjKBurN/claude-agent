@@ -71,6 +71,7 @@
 | **MCP** | 外部资源协议，支持延迟加载 | 文件系统, 数据库 |
 | **Context** | 上下文管理，支持自动压缩（带缓存检查） | 摘要生成, 滑动窗口 |
 | **AgentRunner** | Agent 执行封装，构建并运行 AgentLoop | 同步/流式执行、事件转换 |
+| **Hook** | 生命周期钩子，在不修改主循环的前提下扩展行为 | RAG 注入、日志、安全过滤 |
 
 ### 上下文管理
 
@@ -253,6 +254,7 @@ claude-agent/
 │   │   │   ├── runner.py     # AgentRunner 执行封装
 │   │   │   ├── events.py     # EventBus + AgentEvent（支持有界队列）
 │   │   │   ├── approval.py   # HITL 审批管理
+│   │   │   ├── hooks.py      # AgentHook 生命周期钩子 + KnowledgeRetrievalHook
 │   │   │   ├── session.py    # SessionManager 会话管理
 │   │   │   ├── builder.py    # AgentBuilder 配置驱动组装
 │   │   │   └── llm/          # LLM Provider 抽象
@@ -382,11 +384,30 @@ claude-agent/
 
 ### Agent RAG（Hybrid）流程
 
-Agent 绑定知识库后，采用 Hybrid RAG 策略：
+Agent 绑定知识库后，采用 Hybrid RAG 策略，通过 **KnowledgeRetrievalHook** 实现：
 
-1. **Pre-Retrieval**：用户消息到达后，自动从绑定知识库检索 top-3 相关片段，注入 system prompt 的 `<knowledge_context>` section
+1. **Pre-Retrieval（Hook 注入）**：`KnowledgeRetrievalHook` 在首轮 LLM 调用前，自动从绑定知识库检索 top-3 相关片段，注入到 **user message**（非 system prompt），保证 prompt cache 命中
 2. **Tool-Augmented**：保留 `knowledge_search` 工具，LLM 可主动深入检索
 3. Agent 配置通过 `knowledge_base_ids` 字段绑定知识库
+4. `AgentBuilder` 根据 `knowledge_base_ids` 自动创建 `KnowledgeRetrievalHook`
+
+### Hook 机制
+
+AgentLoop 支持 4 个生命周期钩子点，通过 `AgentHook` Protocol 实现：
+
+| 钩子 | 时机 | 典型场景 |
+|------|------|---------|
+| `on_before_llm` | LLM 调用前，可修改 messages / system_prompt | RAG 注入、上下文压缩 |
+| `on_after_llm` | LLM 响应后 | 响应过滤、日志记录 |
+| `on_before_tool` | 工具执行前，可修改输入或拒绝（返回 None） | 权限控制、输入校验 |
+| `on_after_tool` | 工具执行后，可修改输出 | 输出脱敏、日志记录 |
+
+**Hook 注册方式**：`AgentBuilder._build_hooks()` 根据 `AgentConfig` 自动创建 Hook 列表，传入 `AgentLoop`。
+
+**内置 Hook**：
+- `KnowledgeRetrievalHook`：Pre-Retrieval RAG，仅在首轮迭代执行，检索结果注入 user message
+
+**扩展方式**：实现 `AgentHook` Protocol，在 `_build_hooks()` 中注册。
 
 ### 请求示例
 

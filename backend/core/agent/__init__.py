@@ -8,11 +8,13 @@
 - SessionManager: 会话管理
 - UnifiedToolRegistry: 统一工具注册表
 - AgentBuilder: 配置驱动的 Agent 组装
+- AgentHook: 生命周期钩子机制
 """
 
 from backend.core.agent.approval import ApprovalManager
 from backend.core.agent.builder import AgentBuilder, AgentConfig
 from backend.core.agent.events import AgentEvent, EventBus, EventType
+from backend.core.agent.hooks import AgentHook, HookContext, KnowledgeRetrievalHook
 from backend.core.agent.llm import LLMConfig, LLMProvider, LLMResponse, StreamChunk
 from backend.core.agent.loop import AgentLoop, AgentLoopResult, ToolCallRecord
 from backend.core.agent.runner import AgentRunner
@@ -45,4 +47,8 @@ __all__ = [
     # 组装
     "AgentBuilder",
     "AgentConfig",
+    # Hook
+    "AgentHook",
+    "HookContext",
+    "KnowledgeRetrievalHook",
 ]

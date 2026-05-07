@@ -27,6 +27,9 @@ ENV/
 .coverage
 htmlcov/
 
+# RAG eval datasets (local data, not for git)
+tests/rag/eval_dataset*.json
+
 # Logs
 *.log
 

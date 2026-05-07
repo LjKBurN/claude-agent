@@ -143,27 +143,3 @@ class MemoryPlaceholderProvider:
     def render(self, context: PromptContext) -> str:
         # 未来: 从 context.user_id 查询用户偏好/记忆
         return ""
-
-
-class KnowledgeContextProvider:
-    """知识库 RAG 上下文 — 渲染预检索结果。"""
-
-    section_tag = "knowledge_context"
-
-    def render(self, context: PromptContext) -> str:
-        rag_context = context.extra.get("rag_context", "")
-        kb_ids = context.extra.get("knowledge_base_ids", [])
-        if not rag_context:
-            return ""
-
-        lines = [
-            "以下是来自知识库的相关内容，可直接用于回答用户问题。",
-            "如需更多细节，可使用 knowledge_search 工具深入检索。",
-        ]
-        if kb_ids:
-            lines.append(
-                f"knowledge_search 可用参数: knowledge_base_ids={kb_ids}"
-            )
-        lines.append("")
-        lines.append(rag_context)
-        return "\n".join(lines)

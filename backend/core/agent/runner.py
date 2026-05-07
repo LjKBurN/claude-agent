@@ -152,7 +152,7 @@ class AgentRunner:
         async def execute_tool(name, input_data, tool_id, messages):
             loop = self._build_loop()
             output, _ = await loop._execute_single_tool(
-                name, input_data, tool_id, messages, loop.registry.anthropic_tools()
+                name, input_data, tool_id, messages,
             )
             return output
         return execute_tool
