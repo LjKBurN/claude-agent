@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncGenerator
+from typing import Any
 
 from backend.core.agent.approval import ApprovalManager
 from backend.core.agent.events import EventType
@@ -38,12 +39,14 @@ class AgentRunner:
         max_iterations: int = 20,
         tool_timeout: int = 120,
         request_timeout: int = 300,
+        hooks: list[Any] | None = None,
     ):
         self._llm = llm
         self._registry = registry
         self._max_iterations = max_iterations
         self._tool_timeout = tool_timeout
         self._request_timeout = request_timeout
+        self._hooks = hooks or []
 
     def _build_loop(self) -> AgentLoop:
         """构建 AgentLoop 实例。"""
@@ -55,6 +58,7 @@ class AgentRunner:
             max_iterations=self._max_iterations,
             tool_timeout=self._tool_timeout,
             request_timeout=self._request_timeout,
+            hooks=self._hooks,
         )
 
     async def run(

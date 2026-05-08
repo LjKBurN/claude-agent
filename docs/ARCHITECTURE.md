@@ -285,7 +285,7 @@ claude-agent/
 │   │       ├── types.py      # 核心数据类型（ExtractedDocument, ChunkData）
 │   │       ├── pipeline.py   # DocumentPipeline（提取→分块编排）
 │   │       ├── embedding.py  # 智谱 Embedding 服务（异步批量向量化）
-│   │       ├── vector_store.py # pgvector 向量存储与语义检索
+│   │       ├── vector_store.py # pgvector 向量存储与 Hybrid 检索（向量 + BM25）
 │   │       ├── extractors/   # 文档提取器
 │   │       │   ├── base.py   # BaseExtractor ABC
 │   │       │   ├── markdown.py
@@ -340,7 +340,7 @@ claude-agent/
 │   │       ├── __init__.py
 │   │       ├── session.py
 │   │       ├── channel.py    # Channel + ChannelSession + ChannelRuntime 模型
-│   │       └── knowledge_base.py  # KnowledgeBase + Document(embedding_status) + DocumentChunk
+│   │       └── knowledge_base.py  # KnowledgeBase + Document(embedding_status) + DocumentChunk(tsvector)
 │   └── middleware/           # 中间件
 │       ├── __init__.py
 │       └── auth.py           # API Key 认证
@@ -384,12 +384,26 @@ claude-agent/
 
 ### Agent RAG（Hybrid）流程
 
-Agent 绑定知识库后，采用 Hybrid RAG 策略，通过 **KnowledgeRetrievalHook** 实现：
+Agent 绑定知识库后，采用 **Hybrid Search**（向量 + BM25）策略，通过 **KnowledgeRetrievalHook** 实现：
 
-1. **Pre-Retrieval（Hook 注入）**：`KnowledgeRetrievalHook` 在首轮 LLM 调用前，自动从绑定知识库检索 top-3 相关片段，注入到 **user message**（非 system prompt），保证 prompt cache 命中
-2. **Tool-Augmented**：保留 `knowledge_search` 工具，LLM 可主动深入检索
-3. Agent 配置通过 `knowledge_base_ids` 字段绑定知识库
-4. `AgentBuilder` 根据 `knowledge_base_ids` 自动创建 `KnowledgeRetrievalHook`
+1. **Hybrid Search**：检索时同时执行语义向量检索（pgvector cosine）和 BM25 全文检索（PostgreSQL tsvector），通过 RRF（Reciprocal Rank Fusion）融合两路结果，兼顾语义匹配和精确匹配
+2. **Pre-Retrieval（Hook 注入）**：`KnowledgeRetrievalHook` 在首轮 LLM 调用前，自动从绑定知识库检索 top-3 相关片段，注入到 **user message**（非 system prompt），保证 prompt cache 命中
+3. **Tool-Augmented**：保留 `knowledge_search` 工具，LLM 可主动深入检索
+4. Agent 配置通过 `knowledge_base_ids` 字段绑定知识库
+5. `AgentBuilder` 根据 `knowledge_base_ids` 自动创建 `KnowledgeRetrievalHook`
+
+**Hybrid Search 架构**：
+```
+Query
+  ├─→ Embedding → 向量检索 (pgvector cosine) → [ranked by similarity]
+  ├─→ Tokenize → BM25 检索 (tsvector + ts_rank_cd) → [ranked by relevance]
+  │
+  └─→ RRF 融合 (k=60)
+        → 最终排序的 chunk_id 列表
+        → 批量查询完整数据
+```
+
+**tsvector 自动维护**：数据库触发器在 chunk INSERT/UPDATE 时自动从 `content` 列生成 `content_tsvector`（`simple` 配置，适合中英混杂技术文档），无需应用层干预。
 
 ### Hook 机制
 

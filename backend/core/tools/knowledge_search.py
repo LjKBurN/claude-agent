@@ -66,6 +66,7 @@ async def knowledge_search(arguments: dict) -> str:
                 kb_ids=kb_ids,
                 top_k=top_k,
                 db=db,
+                query_text=query,
             )
     except Exception as e:
         logger.exception("知识库检索失败")

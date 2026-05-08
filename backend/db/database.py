@@ -54,6 +54,28 @@ async def init_db():
                 "ON document_chunks USING hnsw (embedding vector_cosine_ops)"
             ))
 
+            # Hybrid Search: tsvector 全文检索列 + GIN 索引
+            await conn.execute(text(
+                "ALTER TABLE document_chunks "
+                "ADD COLUMN IF NOT EXISTS content_tsvector tsvector"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS idx_chunks_tsvector "
+                "ON document_chunks USING gin(content_tsvector)"
+            ))
+            # 删除旧的 PL/pgSQL 触发器（改用应用层 jieba 分词生成 tsvector）
+            await conn.execute(text(
+                "DROP TRIGGER IF EXISTS document_chunks_tsvector_update "
+                "ON document_chunks"
+            ))
+            await conn.execute(text(
+                "DROP FUNCTION IF EXISTS document_chunks_tsvector_trigger()"
+            ))
+
+    # 回填已有数据（使用 jieba 中文分词后生成 tsvector）
+    if _is_postgresql():
+        await _backfill_tsvector()
+
 
 async def get_db() -> AsyncSession:
     """获取数据库会话（依赖注入）。"""
@@ -62,3 +84,27 @@ async def get_db() -> AsyncSession:
             yield session
         finally:
             await session.close()
+
+
+async def _backfill_tsvector() -> None:
+    """用 jieba 分词回填已有 chunk 的 content_tsvector。"""
+    import jieba
+
+    async with async_session() as db:
+        # 查找需要回填的 chunk
+        result = await db.execute(text(
+            "SELECT id, content FROM document_chunks WHERE content_tsvector IS NULL"
+        ))
+        rows = result.fetchall()
+        if not rows:
+            return
+
+        logger.info("Backfilling tsvector for %d chunks with jieba segmentation", len(rows))
+        for row in rows:
+            segmented = " ".join(jieba.cut(row.content))
+            await db.execute(text(
+                "UPDATE document_chunks SET content_tsvector = "
+                "to_tsvector('simple', :segmented) WHERE id = :id"
+            ), {"segmented": segmented, "id": row.id})
+        await db.commit()
+        logger.info("Tsvector backfill complete")

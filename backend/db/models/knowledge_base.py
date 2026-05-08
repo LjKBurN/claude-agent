@@ -4,6 +4,7 @@ from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.config import get_settings
@@ -88,6 +89,7 @@ class DocumentChunk(Base):
     section_headers: Mapped[list] = mapped_column(JSON, default=list)
     metadata_: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
     embedding = mapped_column(Vector(_embedding_dimensions), nullable=True)
+    content_tsvector = mapped_column(TSVECTOR, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 

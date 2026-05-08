@@ -42,6 +42,12 @@ _pipeline = DocumentPipeline()
 # ==================== Helpers ====================
 
 
+def _segment_for_tsvector(text: str) -> str:
+    """用 jieba 分词，返回空格分隔的文本（供 to_tsvector('simple', ...) 使用）。"""
+    import jieba
+    return " ".join(jieba.cut(text))
+
+
 def _kb_to_info(kb: KnowledgeBase, doc_count: int = 0, chunk_count: int = 0) -> KnowledgeBaseInfo:
     return KnowledgeBaseInfo(
         id=kb.id,
@@ -573,6 +579,7 @@ async def _process_document_bg(doc_id: str) -> None:
             # 写入新的 chunks
             chunk_models = []
             for chunk_data in chunks:
+                segmented = _segment_for_tsvector(chunk_data.content)
                 chunk_model = DocumentChunk(
                     id=str(uuid4()),
                     document_id=doc.id,
@@ -582,6 +589,7 @@ async def _process_document_bg(doc_id: str) -> None:
                     token_count=chunk_data.token_count,
                     section_headers=chunk_data.section_headers,
                     metadata_=chunk_data.metadata,
+                    content_tsvector=func.to_tsvector("simple", segmented),
                 )
                 db.add(chunk_model)
                 chunk_models.append(chunk_model)
@@ -646,6 +654,7 @@ async def _process_url_bg(
 
             first_chunk_models = []
             for chunk_data in first_chunks:
+                segmented = _segment_for_tsvector(chunk_data.content)
                 cm = DocumentChunk(
                     id=str(uuid4()),
                     document_id=doc.id,
@@ -655,6 +664,7 @@ async def _process_url_bg(
                     token_count=chunk_data.token_count,
                     section_headers=chunk_data.section_headers,
                     metadata_=chunk_data.metadata,
+                    content_tsvector=func.to_tsvector("simple", segmented),
                 )
                 db.add(cm)
                 first_chunk_models.append(cm)
@@ -680,6 +690,7 @@ async def _process_url_bg(
 
                 sub_chunk_models = []
                 for chunk_data in page_chunks:
+                    segmented = _segment_for_tsvector(chunk_data.content)
                     cm = DocumentChunk(
                         id=str(uuid4()),
                         document_id=sub_doc.id,
@@ -689,6 +700,7 @@ async def _process_url_bg(
                         token_count=chunk_data.token_count,
                         section_headers=chunk_data.section_headers,
                         metadata_=chunk_data.metadata,
+                        content_tsvector=func.to_tsvector("simple", segmented),
                     )
                     db.add(cm)
                     sub_chunk_models.append(cm)

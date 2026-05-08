@@ -316,6 +316,7 @@ class AgentService:
                     max_iterations=config.max_iterations,
                     tool_timeout=config.tool_timeout,
                     request_timeout=config.request_timeout,
+                    hooks=agent_loop.hooks,
                 )
                 return runner, config
             logger.warning(f"AgentConfig {agent_config_id} not found, falling back to default")
