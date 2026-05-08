@@ -1,10 +1,23 @@
 "use client";
 
+import { type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { CodeBlock } from "./code-block";
 import type { ComponentPropsWithoutRef } from "react";
+
+/** 从 React children 中递归提取纯文本（rehype-highlight 会将代码转为 span 元素）。 */
+function extractTextFromChildren(children: ReactNode): string {
+  if (typeof children === "string") return children;
+  if (typeof children === "number") return String(children);
+  if (!children) return "";
+  if (Array.isArray(children)) return children.map(extractTextFromChildren).join("");
+  if (typeof children === "object" && "props" in children) {
+    return extractTextFromChildren((children as { props: { children?: ReactNode } }).props.children);
+  }
+  return "";
+}
 
 interface MarkdownRendererProps {
   content: string;
@@ -23,7 +36,7 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
           },
           code({ className, children, ...props }: ComponentPropsWithoutRef<"code"> & { className?: string }) {
             const match = /language-(\w+)/.exec(className || "");
-            const codeStr = String(children).replace(/\n$/, "");
+            const codeStr = extractTextFromChildren(children).replace(/\n$/, "");
 
             // Block code with language tag
             if (match) {
