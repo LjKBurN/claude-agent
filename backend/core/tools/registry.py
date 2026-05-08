@@ -126,9 +126,9 @@ def populate_registry(
     """从所有工具源填充统一注册表。
 
     Args:
-        builtin_only: 如果指定，只注册这些内置工具（按名称过滤）
-        skills: 如果指定，只启用这些 skills（空/None = 全部 skills）
-        mcp_servers: 如果指定，只启用这些 MCP servers（空/None = 全部 MCP）
+        builtin_only: None = 全部内置工具; [] = 无内置工具; 非空列表 = 指定的内置工具
+        skills: None = 全部 skills; [] = 无 skills; 非空列表 = 指定的 skills
+        mcp_servers: None = 全部 MCP; [] = 无 MCP; 非空列表 = 指定的 MCP servers
 
     Returns:
         填充好的 UnifiedToolRegistry
@@ -137,15 +137,13 @@ def populate_registry(
 
     registry = UnifiedToolRegistry()
 
-    # 1. 内置工具 — 直接复制 ToolDescriptor，无需类型转换
+    # 1. 内置工具
     for desc in _builtin_registry.all_tools():
-        if builtin_only and desc.name not in builtin_only:
+        if builtin_only is not None and desc.name not in builtin_only:
             continue
         registry.register(desc)
 
-    # 2. Skill meta-tool
-    # skills=None 或 skills=[] 表示全部；非空列表表示只启用指定的 skills
-    # 无论哪种情况，都注册 Skill meta-tool（过滤在 system prompt 层面执行）
+    # 2. Skill meta-tool (None = 全部, [] = 不注册, 非空 = 指定)
     if skills is None or len(skills) > 0:
         try:
             from backend.core.skills.registry import skill_registry

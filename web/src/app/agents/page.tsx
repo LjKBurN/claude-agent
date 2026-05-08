@@ -72,17 +72,17 @@ export default function AgentsPage() {
                         <Badge variant="outline" className="text-[10px]">
                           {agent.builtin_tools.length > 0
                             ? `${agent.builtin_tools.length} 工具`
-                            : "全部工具"}
+                            : "无工具"}
                         </Badge>
                         <Badge variant="outline" className="text-[10px]">
                           {agent.skills.length > 0
                             ? `${agent.skills.length} Skills`
-                            : "全部 Skills"}
+                            : "无 Skills"}
                         </Badge>
                         <Badge variant="outline" className="text-[10px]">
                           {agent.mcp_servers.length > 0
                             ? `${agent.mcp_servers.length} MCP`
-                            : "全部 MCP"}
+                            : "无 MCP"}
                         </Badge>
                       </div>
                     </div>

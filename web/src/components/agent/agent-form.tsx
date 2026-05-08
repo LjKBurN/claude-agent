@@ -65,14 +65,10 @@ export function AgentForm({ initialData, onSubmit, submitLabel }: AgentFormProps
         setAvailableTools(res.builtin);
         setAvailableSkills(res.skills);
         setAvailableMcpServers(res.mcp_servers);
-        // 新建或旧的空数组（代表"全部"）时默认全选
-        if (!initialData || !initialData.builtin_tools?.length) {
+        // 仅新建时默认全选；编辑时保留用户原始选择（包括空数组）
+        if (!initialData) {
           setBuiltinTools(res.builtin.map((t) => t.name));
-        }
-        if (!initialData || !initialData.skills?.length) {
           setSelectedSkills(res.skills.map((s) => s.name));
-        }
-        if (!initialData || !initialData.mcp_servers?.length) {
           setSelectedMcpServers(res.mcp_servers.map((s) => s.name));
         }
       })

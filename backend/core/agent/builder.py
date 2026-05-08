@@ -33,9 +33,9 @@ class AgentConfig:
     max_tokens: int = 8000
 
     # 工具选择
-    builtin_tools: list[str] = field(default_factory=list)  # 空 = 全部
-    skills: list[str] = field(default_factory=list)          # 空 = 全部 skills
-    mcp_servers: list[str] = field(default_factory=list)     # 空 = 全部 MCP servers
+    builtin_tools: list[str] = field(default_factory=list)  # 空 = 无, 非空 = 指定
+    skills: list[str] = field(default_factory=list)         # 空 = 无, 非空 = 指定
+    mcp_servers: list[str] = field(default_factory=list)    # 空 = 无, 非空 = 指定
     knowledge_base_ids: list[str] = field(default_factory=list)  # 绑定的知识库
 
     # 行为
@@ -140,14 +140,10 @@ class AgentBuilder:
 
     def _build_registry(self) -> UnifiedToolRegistry:
         """根据配置选择性地构建工具注册表。"""
-        builtin_only = self.config.builtin_tools if self.config.builtin_tools else None
-        skills = self.config.skills if self.config.skills else None
-        mcp_servers = self.config.mcp_servers if self.config.mcp_servers else None
-
         registry = populate_registry(
-            builtin_only=builtin_only,
-            skills=skills,
-            mcp_servers=mcp_servers,
+            builtin_only=self.config.builtin_tools,
+            skills=self.config.skills,
+            mcp_servers=self.config.mcp_servers,
         )
 
         return registry
@@ -184,6 +180,7 @@ class AgentBuilder:
                     kb_ids=kb_ids,
                     top_k=top_k,
                     db=db,
+                    query_text=query,
                 )
 
             if not results:
