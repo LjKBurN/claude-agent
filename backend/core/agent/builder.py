@@ -155,6 +155,7 @@ class AgentBuilder:
             hooks.append(KnowledgeRetrievalHook(
                 knowledge_base_ids=self.config.knowledge_base_ids,
                 retrieve_fn=self._make_retrieve_fn(),
+                rewrite_fn=self._make_rewrite_fn(),
             ))
         return hooks
 
@@ -196,3 +197,13 @@ class AgentBuilder:
             return "\n\n---\n\n".join(parts)
 
         return retrieve
+
+    def _make_rewrite_fn(self):
+        """创建查询改写函数（在组装层解析基础设施依赖）。"""
+        async def rewrite(query: str, messages: list[dict]) -> str:
+            from backend.core.rag.query_rewriter import get_query_rewriter
+
+            rewriter = get_query_rewriter()
+            return await rewriter.rewrite_with_messages(query, messages)
+
+        return rewrite

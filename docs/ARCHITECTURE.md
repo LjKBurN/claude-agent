@@ -382,19 +382,20 @@ claude-agent/
 | `/api/knowledge-bases/{id}/documents/{doc_id}/chunks` | GET | 文档分块列表 |
 | `/api/knowledge-bases/search` | POST | 跨知识库语义搜索 |
 
-### Agent RAG（Hybrid）流程
+### Agent RAG（Hybrid + Follow-up）流程
 
-Agent 绑定知识库后，采用 **Hybrid Search**（向量 + BM25）策略，通过 **KnowledgeRetrievalHook** 实现：
+Agent 绑定知识库后，采用 **Hybrid Search**（向量 + BM25）+ **Query Rewrite** 策略，通过 **KnowledgeRetrievalHook** 实现：
 
 1. **Hybrid Search**：检索时同时执行语义向量检索（pgvector cosine）和 BM25 全文检索（PostgreSQL tsvector），通过 RRF（Reciprocal Rank Fusion）融合两路结果，兼顾语义匹配和精确匹配
-2. **Pre-Retrieval（Hook 注入）**：`KnowledgeRetrievalHook` 在首轮 LLM 调用前，自动从绑定知识库检索 top-3 相关片段，注入到 **user message**（非 system prompt），保证 prompt cache 命中
-3. **Tool-Augmented**：保留 `knowledge_search` 工具，LLM 可主动深入检索
-4. Agent 配置通过 `knowledge_base_ids` 字段绑定知识库
-5. `AgentBuilder` 根据 `knowledge_base_ids` 自动创建 `KnowledgeRetrievalHook`
+2. **Query Rewrite（Follow-up 检索）**：多轮对话时，`KnowledgeRetrievalHook` 自动检测 follow-up 查询，使用 `QueryRewriter` 将追问改写为完整独立查询（如 "那回调呢？" → "山海账户体系回调接口配置"），提升检索质量
+3. **Pre-Retrieval（Hook 注入）**：改写后的查询执行 Hybrid Search，检索 top-3 相关片段注入到 **user message**（非 system prompt），保证 prompt cache 命中
+4. **Tool-Augmented**：保留 `knowledge_search` 工具，LLM 可主动深入检索
+5. Agent 配置通过 `knowledge_base_ids` 字段绑定知识库
+6. `AgentBuilder` 根据 `knowledge_base_ids` 自动创建 `KnowledgeRetrievalHook`（含 `rewrite_fn`）
 
 **Hybrid Search 架构**：
 ```
-Query
+Query (follow-up? → QueryRewriter 改写为完整查询)
   ├─→ Embedding → 向量检索 (pgvector cosine) → [ranked by similarity]
   ├─→ Tokenize → BM25 检索 (tsvector + ts_rank_cd) → [ranked by relevance]
   │
@@ -419,7 +420,7 @@ AgentLoop 支持 4 个生命周期钩子点，通过 `AgentHook` Protocol 实现
 **Hook 注册方式**：`AgentBuilder._build_hooks()` 根据 `AgentConfig` 自动创建 Hook 列表，传入 `AgentLoop`。
 
 **内置 Hook**：
-- `KnowledgeRetrievalHook`：Pre-Retrieval RAG，仅在首轮迭代执行，检索结果注入 user message
+- `KnowledgeRetrievalHook`：Pre-Retrieval RAG，首轮迭代执行，支持 Follow-up 查询改写，检索结果注入 user message
 
 **扩展方式**：实现 `AgentHook` Protocol，在 `_build_hooks()` 中注册。
 

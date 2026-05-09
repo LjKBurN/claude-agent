@@ -134,6 +134,9 @@ async def run_after_tool_hooks(
 RetrieveFn = Callable[[str, list[str], int], Awaitable[str]]
 """检索函数签名: (query, kb_ids, top_k) -> formatted_context"""
 
+RewriteFn = Callable[[str, list[dict]], Awaitable[str]]
+"""查询改写函数签名: (query, messages) -> rewritten_query"""
+
 
 # ==================== 内置 Hook ====================
 
@@ -154,10 +157,12 @@ class KnowledgeRetrievalHook:
         knowledge_base_ids: list[str],
         retrieve_fn: RetrieveFn,
         top_k: int = 3,
+        rewrite_fn: RewriteFn | None = None,
     ):
         self.knowledge_base_ids = knowledge_base_ids
         self._retrieve_fn = retrieve_fn
         self.top_k = top_k
+        self._rewrite_fn = rewrite_fn
 
     async def on_before_llm(self, ctx: HookContext) -> HookContext:
         # 仅首轮检索
@@ -165,11 +170,25 @@ class KnowledgeRetrievalHook:
             return ctx
 
         # 提取最后一条用户文本消息
-        query = self._extract_user_query(ctx.messages)
-        if not query:
+        original_query = self._extract_user_query(ctx.messages)
+        if not original_query:
             return ctx
 
-        rag_context = await self._pre_retrieve(query)
+        # 用于检索的 query（可能包含改写内容）
+        retrieve_query = original_query
+
+        # Follow-up 检测 + 查询改写（仅配置了知识库时启用）
+        if self._rewrite_fn and self._is_followup(ctx.messages):
+            try:
+                rewritten = await self._rewrite_fn(original_query, ctx.messages)
+                if rewritten and rewritten != original_query:
+                    logger.info("Follow-up rewrite: %r → %r", original_query, rewritten)
+                    # 保留原始 query，拼接改写结果（Elastic 研究表明替换原 query 效果更差）
+                    retrieve_query = f"{original_query} {rewritten}"
+            except Exception:
+                logger.warning("Query rewrite failed, using original", exc_info=True)
+
+        rag_context = await self._pre_retrieve(retrieve_query)
         if not rag_context:
             return ctx
 
@@ -188,7 +207,8 @@ class KnowledgeRetrievalHook:
             # 跳过 tool_result 格式的 user 消息
             if isinstance(content, list):
                 # tool_result 消息格式: [{"type": "tool_result", ...}]
-                if content and isinstance(content[0], dict) and content[0].get("type") == "tool_result":
+                if (content and isinstance(content[0], dict)
+                        and content[0].get("type") == "tool_result"):
                     continue
                 # 也可能是混合内容，尝试提取文本
                 for block in content:
@@ -198,6 +218,13 @@ class KnowledgeRetrievalHook:
             if isinstance(content, str) and content.strip():
                 return content.strip()
         return ""
+
+    def _is_followup(self, messages: list[dict]) -> bool:
+        """检测当前是否为多轮对话（messages 中存在之前的 assistant 消息）。"""
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                return True
+        return False
 
     async def _pre_retrieve(self, query: str) -> str:
         """委托给注入的 retrieve_fn 执行检索。"""
@@ -227,7 +254,8 @@ class KnowledgeRetrievalHook:
                 return
             if isinstance(content, list):
                 # 跳过 tool_result 消息
-                if content and isinstance(content[0], dict) and content[0].get("type") == "tool_result":
+                if (content and isinstance(content[0], dict)
+                        and content[0].get("type") == "tool_result"):
                     continue
                 # 在第一个文本 block 前注入
                 for block in content:
