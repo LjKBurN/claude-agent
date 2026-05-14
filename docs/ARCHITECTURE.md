@@ -72,6 +72,7 @@
 | **Context** | 上下文管理，支持自动压缩（带缓存检查） | 摘要生成, 滑动窗口 |
 | **AgentRunner** | Agent 执行封装，构建并运行 AgentLoop | 同步/流式执行、事件转换 |
 | **Hook** | 生命周期钩子，在不修改主循环的前提下扩展行为 | RAG 注入、日志、安全过滤 |
+| **Sub-Agent** | 上下文隔离的任务委托，将自包含子任务在独立上下文中执行 | spawn_subagent 工具 |
 
 ### 上下文管理
 
@@ -268,6 +269,7 @@ claude-agent/
 │   │   │   ├── file.py       # 文件操作工具
 │   │   │   ├── http.py       # HTTP 请求工具
 │   │   │   └── knowledge_search.py  # 知识库语义检索工具
+│   │   │   └── subagent.py          # 子 Agent 委托工具（上下文隔离）
 │   │   ├── tool_executor.py  # 统一工具执行器
 │   │   ├── tools/            # 工具模块（可扩展）
 │   │   │   ├── __init__.py   # 工具注册入口
@@ -423,6 +425,29 @@ AgentLoop 支持 4 个生命周期钩子点，通过 `AgentHook` Protocol 实现
 - `KnowledgeRetrievalHook`：Pre-Retrieval RAG，首轮迭代执行，支持 Follow-up 查询改写，检索结果注入 user message
 
 **扩展方式**：实现 `AgentHook` Protocol，在 `_build_hooks()` 中注册。
+
+### Sub-Agent（上下文隔离）
+
+Agent 执行复杂任务时，工具调用的中间过程（读文件、搜索、试错）会快速消耗上下文窗口。Sub-Agent 将自包含的子任务隔离到独立上下文空间执行，主上下文只接收最终结果。
+
+**架构**：
+```
+父 Agent 上下文: [用户消息] → LLM → spawn_subagent({task, context})
+                                         │
+                                         ▼ 独立上下文
+                       子 Agent: [task+context] → read_file → grep → 最终结果
+                                         │
+                                         ▼ 只返回结果文本
+                       父 Agent: 收到结果 → 继续对话
+```
+
+**实现**：
+- `spawn_subagent` 工具注册为内置工具（`backend/core/tools/subagent.py`）
+- 实际执行在 `AgentLoop._execute_sub_agent()` 中，类似 MCP 工具的特殊处理
+- 子 Agent 使用相同的 LLM Provider，受限工具集（`SUB_AGENT_TOOLS` 白名单）
+- 事件：`SUB_AGENT_START` / `SUB_AGENT_END` 边界事件，前端展示任务描述和状态
+
+**递归防护**：子 Agent 的 registry 由 `populate_registry(builtin_only=SUB_AGENT_TOOLS)` 构建，不含 `spawn_subagent` / `create_task` / `update_task`，LLM 无法调用不存在的工具，物理层面阻断递归。
 
 ### 请求示例
 

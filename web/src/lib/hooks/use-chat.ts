@@ -15,6 +15,7 @@ export function useChat() {
     streamingText,
     streamingToolCalls,
     streamingToolName,
+    subAgentInfo,
     error,
     needsApproval,
     approvalTools,
@@ -33,6 +34,8 @@ export function useChat() {
     reset,
     setApproval,
     clearApproval,
+    setSubAgentStart,
+    setSubAgentDone,
   } = useChatStore();
 
   const send = useCallback(
@@ -79,6 +82,12 @@ export function useChat() {
             case "approval_needed":
               setApproval(event.tools);
               break;
+            case "sub_agent_start":
+              setSubAgentStart(event.task);
+              break;
+            case "sub_agent_end":
+              setSubAgentDone();
+              break;
             case "done":
               break;
           }
@@ -111,6 +120,8 @@ export function useChat() {
       addToolStart,
       addToolEnd,
       setApproval,
+      setSubAgentStart,
+      setSubAgentDone,
       finalizeStream,
       stopStreaming,
       setError,
@@ -129,6 +140,7 @@ export function useChat() {
     streamingText,
     streamingToolCalls,
     streamingToolName,
+    subAgentInfo,
     error,
     needsApproval,
     approvalTools,

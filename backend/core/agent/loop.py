@@ -118,7 +118,7 @@ class AgentLoop:
             ctx = await run_before_llm_hooks(
                 self.hooks, HookContext(
                     messages=messages, system_prompt=system,
-                    iteration=iteration,   
+                    iteration=iteration,
                 ),
             )
 
@@ -321,6 +321,68 @@ class AgentLoop:
 
     # ==================== 工具执行 ====================
 
+    async def _execute_sub_agent(self, tool_input: dict) -> str:
+        """在独立上下文中执行子 Agent。
+
+        子 Agent 使用相同的 LLM 配置但受限工具集，
+        探索过程不污染父 Agent 的上下文窗口。
+        """
+        task = tool_input.get("task", "")
+        context = tool_input.get("context", "")
+
+        if not task:
+            return "Error: task is required"
+
+        # 发出子 Agent 开始事件
+        await self.events.emit(AgentEvent(
+            type=EventType.SUB_AGENT_START,
+            data={"task": task, "context": context[:200] if context else ""},
+        ))
+
+        try:
+            from backend.core.agent.approval import ApprovalManager
+            from backend.core.tools.registry import populate_registry
+            from backend.core.tools.subagent import (
+                SUB_AGENT_SYSTEM_PROMPT,
+                SUB_AGENT_TOOLS,
+            )
+
+            # 构建受限 registry（不含 spawn_subagent / task 工具）
+            sub_registry = populate_registry(builtin_only=SUB_AGENT_TOOLS)
+
+            # 构建子 AgentLoop（复用 LLM，限制迭代次数）
+            sub_loop = AgentLoop(
+                llm=self.llm,
+                registry=sub_registry,
+                approval=ApprovalManager(sub_registry),
+                max_iterations=min(self.max_iterations, 10),
+                tool_timeout=self.tool_timeout,
+                request_timeout=self.request_timeout,
+            )
+
+            # 构建子 Agent 的 messages
+            user_content = f"{context}\n\n{task}" if context else task
+            sub_messages = [{"role": "user", "content": user_content}]
+
+            # 执行子 Agent（非流式，不干扰父 Agent 的 _last_final_message）
+            result = await sub_loop.run(sub_messages, system=SUB_AGENT_SYSTEM_PROMPT)
+
+            # 发出子 Agent 结束事件
+            await self.events.emit(AgentEvent(
+                type=EventType.SUB_AGENT_END,
+                data={"task": task, "result_length": len(result.text)},
+            ))
+
+            return result.text
+
+        except Exception as e:
+            logger.error(f"Sub-agent execution failed: {e}", exc_info=True)
+            await self.events.emit(AgentEvent(
+                type=EventType.SUB_AGENT_END,
+                data={"task": task, "error": str(e)[:200]},
+            ))
+            return f"Sub-agent failed: {type(e).__name__}: {str(e)[:500]}"
+
     async def _execute_single_tool(
         self,
         tool_name: str,
@@ -343,6 +405,12 @@ class AgentLoop:
         if resolved_input is None:
             return f"Tool '{tool_name}' blocked by hook", extra_events
         tool_input = resolved_input
+
+        # 子 Agent 委托 — 独立上下文执行
+        if tool_name == "spawn_subagent":
+            output = await self._execute_sub_agent(tool_input)
+            output = await run_after_tool_hooks(self.hooks, tool_name, tool_input, output)
+            return output, extra_events
 
         try:
             if tool_name in mcp_tool_names:

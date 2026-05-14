@@ -130,6 +130,19 @@ class AgentRunner:
                         "count": event.data.get("count", 0),
                         "tools": event.data.get("tools", []),
                     }
+                elif event.type == EventType.SUB_AGENT_START:
+                    yield {
+                        "type": "sub_agent_start",
+                        "task": event.data.get("task", ""),
+                        "context": event.data.get("context", ""),
+                    }
+                elif event.type == EventType.SUB_AGENT_END:
+                    yield {
+                        "type": "sub_agent_end",
+                        "task": event.data.get("task", ""),
+                        "result_length": event.data.get("result_length"),
+                        "error": event.data.get("error"),
+                    }
                 elif event.type == EventType.APPROVAL_NEEDED:
                     yield {
                         "type": "approval_needed",

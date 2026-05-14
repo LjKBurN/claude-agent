@@ -4,7 +4,7 @@
 """
 
 # 导入所有工具模块以触发注册
-from backend.core.tools import bash, file, http, search, task  # noqa: F401
+from backend.core.tools import bash, file, http, search, subagent, task  # noqa: F401
 from backend.core.tools.base import (
     get_all_tools,
     get_tool,

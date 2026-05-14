@@ -16,6 +16,7 @@ interface MessageListProps {
   streamingText: string;
   streamingToolCalls: ToolCall[];
   streamingToolName: string | null;
+  subAgentInfo: { task: string; status: "running" | "done" } | null;
 }
 
 export function MessageList({
@@ -24,6 +25,7 @@ export function MessageList({
   streamingText,
   streamingToolCalls,
   streamingToolName,
+  subAgentInfo,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -69,6 +71,7 @@ export function MessageList({
                 toolCall={{ name: streamingToolName, input: {}, output: "" }}
                 isRunning
                 defaultOpen
+                subAgentInfo={streamingToolName === "spawn_subagent" ? subAgentInfo : null}
               />
             )}
 

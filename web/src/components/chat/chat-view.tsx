@@ -45,6 +45,7 @@ export function ChatView({ sessionId }: ChatViewProps) {
         streamingText={chat.streamingText}
         streamingToolCalls={chat.streamingToolCalls}
         streamingToolName={chat.streamingToolName}
+        subAgentInfo={chat.subAgentInfo}
       />
 
       {/* Approval banner */}

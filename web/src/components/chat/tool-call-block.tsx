@@ -11,14 +11,21 @@ import {
   Globe,
   Wrench,
   Puzzle,
+  Cpu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ToolCall } from "@/lib/api/types";
+
+interface SubAgentInfo {
+  task: string;
+  status: "running" | "done";
+}
 
 interface ToolCallBlockProps {
   toolCall: ToolCall;
   isRunning?: boolean;
   defaultOpen?: boolean;
+  subAgentInfo?: SubAgentInfo | null;
 }
 
 function getToolIcon(name: string) {
@@ -26,6 +33,7 @@ function getToolIcon(name: string) {
   if (name.startsWith("read_") || name.startsWith("write_") || name.startsWith("edit_") || name === "list_dir") return FileText;
   if (name.startsWith("http")) return Globe;
   if (name === "Skill") return Wrench;
+  if (name === "spawn_subagent") return Cpu;
   return Puzzle;
 }
 
@@ -50,6 +58,7 @@ export function ToolCallBlock({
   toolCall,
   isRunning = false,
   defaultOpen = false,
+  subAgentInfo,
 }: ToolCallBlockProps) {
   const [open, setOpen] = useState(defaultOpen);
   const Icon = getToolIcon(toolCall.name);
@@ -77,7 +86,14 @@ export function ToolCallBlock({
           <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         )}
         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        <span className="font-medium">{toolCall.name}</span>
+        <span className="font-medium">
+          {toolCall.name === "spawn_subagent" ? "Sub-Agent" : toolCall.name}
+        </span>
+        {subAgentInfo && (
+          <span className="truncate text-xs text-muted-foreground">
+            {subAgentInfo.task}
+          </span>
+        )}
         {hasImages && (
           <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] text-primary">
             {imageParts.length} 张图片

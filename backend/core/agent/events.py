@@ -23,9 +23,12 @@ class EventType(str, Enum):
     TOOL_START = "tool_start"
     TOOL_END = "tool_end"
     SKILL_LOAD = "skill_load"
+    MCP_TOOLS_LOADED = "mcp_tools_loaded"
     APPROVAL_NEEDED = "approval_needed"
     DONE = "done"
     ERROR = "error"
+    SUB_AGENT_START = "sub_agent_start"
+    SUB_AGENT_END = "sub_agent_end"
 
 
 @dataclass

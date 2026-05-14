@@ -16,6 +16,7 @@ interface ChatState {
   streamingText: string;
   streamingToolCalls: ToolCall[];
   streamingToolName: string | null;
+  subAgentInfo: { task: string; status: "running" | "done" } | null;
   error: string | null;
   needsApproval: boolean;
   approvalTools: { name: string; input: Record<string, unknown> }[];
@@ -36,6 +37,8 @@ interface ChatState {
   reset: () => void;
   setApproval: (tools: { name: string; input: Record<string, unknown> }[]) => void;
   clearApproval: () => void;
+  setSubAgentStart: (task: string) => void;
+  setSubAgentDone: () => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -45,6 +48,7 @@ export const useChatStore = create<ChatState>((set) => ({
   streamingText: "",
   streamingToolCalls: [],
   streamingToolName: null,
+  subAgentInfo: null,
   error: null,
   needsApproval: false,
   approvalTools: [],
@@ -102,11 +106,12 @@ export const useChatStore = create<ChatState>((set) => ({
         streamingText: "",
         streamingToolCalls: [],
         streamingToolName: null,
+        subAgentInfo: null,
       };
     }),
 
   startStreaming: () =>
-    set({ isStreaming: true, streamingText: "", streamingToolCalls: [], error: null, needsApproval: false, approvalTools: [] }),
+    set({ isStreaming: true, streamingText: "", streamingToolCalls: [], subAgentInfo: null, error: null, needsApproval: false, approvalTools: [] }),
 
   stopStreaming: () =>
     set((state) => {
@@ -127,9 +132,10 @@ export const useChatStore = create<ChatState>((set) => ({
           streamingText: "",
           streamingToolCalls: [],
           streamingToolName: null,
+          subAgentInfo: null,
         };
       }
-      return { isStreaming: false, streamingText: "" };
+      return { isStreaming: false, streamingText: "", subAgentInfo: null };
     }),
 
   setApproval: (tools) =>
@@ -153,12 +159,20 @@ export const useChatStore = create<ChatState>((set) => ({
         streamingText: "",
         streamingToolCalls: [],
         streamingToolName: null,
+        subAgentInfo: null,
         needsApproval: true,
         approvalTools: tools,
       };
     }),
 
   clearApproval: () => set({ needsApproval: false, approvalTools: [] }),
+
+  setSubAgentStart: (task) => set({ subAgentInfo: { task, status: "running" } }),
+
+  setSubAgentDone: () =>
+    set((state) => ({
+      subAgentInfo: state.subAgentInfo ? { ...state.subAgentInfo, status: "done" } : null,
+    })),
 
   setError: (error) => set({ error, isStreaming: false }),
 
@@ -184,5 +198,6 @@ export const useChatStore = create<ChatState>((set) => ({
       error: null,
       needsApproval: false,
       approvalTools: [],
+      subAgentInfo: null,
     }),
 }));

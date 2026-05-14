@@ -7,6 +7,8 @@ export type SSEEvent =
   | { type: "tool_end"; name: string; output: string }
   | { type: "skill_load"; name: string; message: string }
   | { type: "approval_needed"; message: string; tools: { name: string; input: Record<string, unknown> }[] }
+  | { type: "sub_agent_start"; task: string; context?: string }
+  | { type: "sub_agent_end"; task: string; result_length?: number; error?: string }
   | { type: "done"; tool_calls?: ToolCall[]; status?: string };
 
 export async function parseSSEStream(
@@ -89,6 +91,19 @@ function parseSSEEvent(raw: string): SSEEvent | null {
           type: "approval_needed",
           message: parsed.message || "",
           tools: parsed.tools || [],
+        };
+      case "sub_agent_start":
+        return {
+          type: "sub_agent_start",
+          task: parsed.task || "",
+          context: parsed.context || "",
+        };
+      case "sub_agent_end":
+        return {
+          type: "sub_agent_end",
+          task: parsed.task || "",
+          result_length: parsed.result_length,
+          error: parsed.error,
         };
       case "done":
         return { type: "done", tool_calls: parsed.tool_calls, status: parsed.status };
